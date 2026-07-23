@@ -24,7 +24,7 @@ RUN mkdir -p /opt/models \
       "${RELEASE_FLAG}"
 
 FROM public.ecr.aws/lambda/python:3.12@sha256:0628ddc11919f85f4261517d356392dbbc6b3181568d87a376ae2e814464c230
-RUN dnf upgrade -y --releasever=latest glib2 acl \
+RUN dnf upgrade -y --releasever=latest glib2 libacl \
     && dnf clean all \
     && rm -rf /var/cache/dnf
 COPY --from=build "${LAMBDA_TASK_ROOT}" "${LAMBDA_TASK_ROOT}"
