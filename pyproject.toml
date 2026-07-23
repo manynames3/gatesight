@@ -43,7 +43,7 @@ dev = [
   "boto3-stubs[dynamodb,events,s3,sns,sqs,ssm]==1.40.21",
   "httpx==0.28.1",
   "hypothesis==6.138.15",
-  "moto[dynamodb,s3,sqs]==5.1.11",
+  "moto[dynamodb,s3,sqs]==5.2.2",
   "mypy==1.17.1",
   "pip-audit==2.9.0",
   "pytest==9.1.1",
