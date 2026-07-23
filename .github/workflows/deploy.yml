@@ -1,0 +1,96 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment
+        type: choice
+        options: [dev, prod]
+        default: dev
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: gatesight-${{ inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'dev' }}
+    env:
+      ENVIRONMENT: ${{ inputs.environment || 'dev' }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: { version: "0.8.13", enable-cache: true }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm, cache-dependency-path: apps/web/package-lock.json }
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "1.14.9" }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@v2
+      - uses: sigstore/cosign-installer@v3.9.2
+      - run: npm --prefix apps/web ci
+      - run: uv sync --frozen --extra api --extra recognition --group dev
+      - run: make test-unit
+      - run: make build-lambdas
+      - name: Enforce model redistribution approval
+        run: >-
+          uv run python ml/download_models.py
+          --manifest ml/model-manifest.json
+          --output build/models
+          --verify
+          --require-redistribution-approval
+      - name: Build and push immutable worker
+        env:
+          ECR_REPOSITORY_URL: ${{ vars.ECR_REPOSITORY_URL }}
+        run: |
+          docker build --platform linux/amd64 -f services/recognition_worker/Dockerfile -t "$ECR_REPOSITORY_URL:${GITHUB_SHA}" .
+          docker push "$ECR_REPOSITORY_URL:${GITHUB_SHA}"
+          DIGEST="$(aws ecr describe-images --repository-name "${ECR_REPOSITORY_URL##*/}" --image-ids imageTag="$GITHUB_SHA" --query 'imageDetails[0].imageDigest' --output text)"
+          cosign sign --yes "$ECR_REPOSITORY_URL@$DIGEST"
+          cosign verify \
+            --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/deploy.yml@" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$ECR_REPOSITORY_URL@$DIGEST"
+          echo "TF_VAR_worker_image_uri=$ECR_REPOSITORY_URL@$DIGEST" >> "$GITHUB_ENV"
+      - name: Terraform plan and apply
+        env:
+          TF_VAR_web_origins: ${{ vars.TF_VAR_WEB_ORIGINS }}
+          TF_VAR_dashboard_url: ${{ vars.DASHBOARD_URL }}
+          TF_VAR_cognito_domain_prefix: ${{ vars.COGNITO_DOMAIN_PREFIX }}
+          TF_VAR_budget_email: ${{ vars.BUDGET_EMAIL }}
+          TF_VAR_notification_email: ${{ vars.NOTIFICATION_EMAIL }}
+        run: |
+          terraform -chdir="infrastructure/terraform/environments/$ENVIRONMENT" init -backend-config=backend.hcl
+          terraform -chdir="infrastructure/terraform/environments/$ENVIRONMENT" plan -out=tfplan
+          terraform -chdir="infrastructure/terraform/environments/$ENVIRONMENT" apply -auto-approve tfplan
+      - name: Build and deploy Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VITE_API_ORIGIN: ${{ vars.API_ORIGIN }}
+          VITE_UPLOAD_ORIGIN: ${{ vars.UPLOAD_ORIGIN }}
+          VITE_COGNITO_AUTHORITY: ${{ vars.COGNITO_AUTHORITY }}
+          VITE_COGNITO_CLIENT_ID: ${{ vars.COGNITO_CLIENT_ID }}
+          VITE_COGNITO_REDIRECT_URI: ${{ vars.COGNITO_REDIRECT_URI }}
+          VITE_COGNITO_LOGOUT_URI: ${{ vars.COGNITO_LOGOUT_URI }}
+          VITE_COGNITO_DOMAIN: ${{ vars.COGNITO_DOMAIN }}
+        run: |
+          npm --prefix apps/web run build
+          npx wrangler@4 pages deploy apps/web/dist --project-name "${{ vars.CLOUDFLARE_PAGES_PROJECT }}" --branch main
+      - name: Authenticated smoke
+        env:
+          GATESIGHT_API_URL: ${{ vars.API_ORIGIN }}
+          GATESIGHT_ACCESS_TOKEN: ${{ secrets.SMOKE_ACCESS_TOKEN }}
+        run: make smoke

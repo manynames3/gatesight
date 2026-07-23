@@ -1,0 +1,5 @@
+worker_image_uri      = "123456789012.dkr.ecr.us-east-1.amazonaws.com/gatesight-dev-recognition@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+web_origins           = ["https://dev.gatesight.example"]
+dashboard_url         = "https://dev.gatesight.example"
+cognito_domain_prefix = "gatesight-dev-unique"
+budget_email           = "owner@example.com"

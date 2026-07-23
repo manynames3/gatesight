@@ -1,0 +1,60 @@
+# Architecture
+
+## Design objective
+
+GateSight separates the time-critical act of photographing a vehicle from CPU-heavy recognition. The browser captures first, the control plane issues capability-limited upload instructions, SQS controls work, and versioned domain events fan out only after observation persistence.
+
+## Trust boundaries
+
+1. **Public browser / Cloudflare Pages** — untrusted client input. OAuth state and tokens use session storage; media stays in process memory.
+2. **Cognito and API Gateway** — Hosted UI identity, PKCE, JWT signature/audience/issuer validation.
+3. **Control API** — role, tenant, facility, state, payload, idempotency, and object-key enforcement.
+4. **Private data plane** — S3, SQS, DynamoDB, KMS, EventBridge, and Lambda under service-specific roles.
+5. **Operations** — GitHub OIDC deployment roles, CloudWatch, security notification topic, and human review.
+
+Client identifiers are never authorization evidence. The backend derives tenant membership from verified claims and verifies each facility/object relationship.
+
+## Components
+
+| Component | Responsibility | Scaling/failure boundary |
+|---|---|---|
+| React station | Camera lifecycle, burst, memory-only queue, direct upload, polling | Browser/tab/device |
+| Control API | Sessions, presign, completion, status, domain/admin APIs | ZIP Lambda |
+| S3 | Encrypted capture and derived evidence retention | Regional service |
+| SQS Standard | Recognition buffer, retry, DLQ, backpressure | At-least-once |
+| Recognition worker | Decode, quality, FastALPR, consensus, transaction | Container Lambda, batch 1 |
+| DynamoDB | Domain state, conditions, transactions, TTL, outbox stream | On-demand tables |
+| Outbox publisher | Publish committed event intent | Stream Lambda |
+| EventBridge | Independent business routing | At-least-once |
+| Visit projector | Pair entry/exit and record anomalies | Idempotent Lambda |
+| Security evaluator | Allowlist/blocked lookup and alert suppression | Idempotent Lambda |
+
+## State transitions
+
+Capture transitions are conditional:
+
+```text
+CREATED → UPLOADING → QUEUED → PROCESSING
+                                  ├→ RECOGNIZED
+                                  ├→ NEEDS_REVIEW
+                                  ├→ NO_PLATE
+                                  ├→ MULTIPLE_PLATES
+                                  └→ FAILED
+```
+
+The worker uses a deterministic observation/outbox ID derived from the capture ID. A duplicate delivery either claims `QUEUED → PROCESSING`, sees the committed observation, or fails for retry; it cannot create another observation.
+
+## Availability and consistency
+
+- SQS and EventBridge are at-least-once; duplicate delivery is expected.
+- Standard queue order is not trusted.
+- `estimatedCapturedAtServer` orders domain activity.
+- GSI reads may be eventually consistent; correctness boundaries use primary-key reads and transactions.
+- Outbox publication can duplicate after publish-before-status failure. Consumer markers make the duplicate harmless.
+- Capture completion is explicit because a multi-frame burst cannot be inferred from individual S3 object events.
+
+## Deployment topology
+
+AWS resources are regional and configurable from `us-east-1`. No VPC is created because every dependency is an AWS public service endpoint and no private network requirement exists. Introducing a VPC requires an ADR and cost review; it would otherwise introduce NAT or endpoint cost/complexity.
+
+Cloudflare Pages hosts static assets. API/S3/Cognito origins appear in CORS and generated CSP. Production and preview domains are separate configured origins.

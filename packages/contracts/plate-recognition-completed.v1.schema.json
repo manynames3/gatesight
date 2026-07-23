@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gatesight.example/contracts/plate-recognition-completed.v1.schema.json",
+  "title": "PlateRecognitionCompleted.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "specversion",
+    "id",
+    "type",
+    "source",
+    "subject",
+    "time",
+    "datacontenttype",
+    "correlationId",
+    "tenantId",
+    "data"
+  ],
+  "properties": {
+    "specversion": {"const": "1.0"},
+    "id": {"type": "string"},
+    "type": {"const": "com.gatesight.plate-recognition.completed.v1"},
+    "source": {"const": "/services/recognition-worker"},
+    "subject": {"type": "string"},
+    "time": {"type": "string", "format": "date-time"},
+    "datacontenttype": {"const": "application/json"},
+    "correlationId": {"type": "string"},
+    "tenantId": {"type": "string"},
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation_id",
+        "capture_id",
+        "facility_id",
+        "station_id",
+        "direction",
+        "state",
+        "captured_at",
+        "confidence_category"
+      ],
+      "properties": {
+        "observation_id": {"type": "string"},
+        "capture_id": {"type": "string"},
+        "facility_id": {"type": "string"},
+        "station_id": {"type": "string"},
+        "direction": {"enum": ["ENTRY", "EXIT"]},
+        "state": {
+          "enum": ["RECOGNIZED", "NEEDS_REVIEW", "NO_PLATE", "MULTIPLE_PLATES", "FAILED"]
+        },
+        "captured_at": {"type": "string", "format": "date-time"},
+        "confidence_category": {"enum": ["HIGH", "MEDIUM", "LOW", "NONE"]},
+        "lookup_token": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"}
+      }
+    }
+  }
+}

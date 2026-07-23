@@ -1,0 +1,89 @@
+from __future__ import annotations
+
+from gatesight_domain.consensus import ConsensusThresholds, decide_consensus, levenshtein
+from gatesight_domain.models import FrameQuality, ObservationState, PlateCandidate
+
+
+def candidate(
+    text: str,
+    frame: int,
+    *,
+    detector: float = 0.99,
+    ocr: float = 0.99,
+    usable: bool = True,
+    pixels: int = 180,
+) -> PlateCandidate:
+    return PlateCandidate(
+        frame_index=frame,
+        raw_text=text,
+        normalized_text=text or None,
+        detector_confidence=detector,
+        ocr_confidence=ocr,
+        character_confidences=[ocr] * len(text),
+        quality=FrameQuality(
+            blur_score=300,
+            exposure_score=0.95,
+            glare_score=0.01,
+            perspective_score=0.95,
+            plate_pixel_width=pixels,
+            usable=usable,
+        ),
+        bounding_box=(10, 10, 10 + pixels, 80),
+    )
+
+
+def test_exact_agreement_across_good_frames_is_recognized() -> None:
+    result = decide_consensus([candidate("ABC123", 0), candidate("ABC123", 1)])
+    assert result.state is ObservationState.RECOGNIZED
+    assert result.normalized_text == "ABC123"
+
+
+def test_plate_in_only_one_frame_needs_review() -> None:
+    result = decide_consensus([candidate("ABC123", 0)])
+    assert result.state is ObservationState.NEEDS_REVIEW
+
+
+def test_conflicting_high_confidence_readings_need_review() -> None:
+    result = decide_consensus(
+        [
+            candidate("ABC123", 0),
+            candidate("ABC123", 1),
+            candidate("XYZ789", 2),
+        ]
+    )
+    assert result.state is ObservationState.NEEDS_REVIEW
+    assert "conflicting" in result.reason
+
+
+def test_low_confidence_ocr_needs_review() -> None:
+    result = decide_consensus([candidate("ABC123", 0, ocr=0.3), candidate("ABC123", 1, ocr=0.3)])
+    assert result.state is ObservationState.NEEDS_REVIEW
+
+
+def test_multiple_plates_are_ambiguous() -> None:
+    result = decide_consensus([candidate("ABC123", 0)], ambiguous_plate_count=2)
+    assert result.state is ObservationState.MULTIPLE_PLATES
+
+
+def test_no_plate_state() -> None:
+    assert decide_consensus([]).state is ObservationState.NO_PLATE
+
+
+def test_bad_quality_and_small_plate_needs_review() -> None:
+    result = decide_consensus(
+        [candidate("ABC123", 0, usable=False), candidate("ABC123", 1, pixels=20)]
+    )
+    assert result.state is ObservationState.NEEDS_REVIEW
+
+
+def test_edit_distance() -> None:
+    assert levenshtein("ABC123", "ABC128") == 1
+    assert levenshtein("ABC123", "XYZ789") == 6
+
+
+def test_thresholds_are_configurable() -> None:
+    result = decide_consensus(
+        [candidate("ABC123", 0)],
+        ConsensusThresholds(high_confidence=0.5, minimum_good_frames=1),
+    )
+    assert result.state is ObservationState.RECOGNIZED

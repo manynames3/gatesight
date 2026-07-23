@@ -1,0 +1,13 @@
+FROM public.ecr.aws/lambda/python:3.12@sha256:0628ddc11919f85f4261517d356392dbbc6b3181568d87a376ae2e814464c230 AS build
+RUN pip install --no-cache-dir uv==0.8.13
+COPY pyproject.toml uv.lock /asset/
+WORKDIR /asset
+RUN uv export --frozen --no-dev --no-emit-project --extra api --format requirements-txt > requirements.txt \
+    && pip install --no-cache-dir --target /layer -r requirements.txt
+COPY packages /src/packages
+COPY services /src/services
+COPY scripts/package_lambdas.py /src/scripts/package_lambdas.py
+RUN python /src/scripts/package_lambdas.py --layer /layer --source /src --output /out/lambda
+
+FROM scratch
+COPY --from=build /out /

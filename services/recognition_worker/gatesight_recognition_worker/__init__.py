@@ -1,0 +1,1 @@
+"""Asynchronous FastALPR recognition worker."""

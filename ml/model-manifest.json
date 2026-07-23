@@ -1,0 +1,74 @@
+{
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-07-23T00:00:00Z",
+  "releaseGate": {
+    "status": "REVIEW_REQUIRED",
+    "reason": "The source repositories are MIT-licensed, but their release pages do not state separate redistribution terms or training-dataset provenance for these weight files. Obtain written confirmation from the maintainer and legal approval before proprietary redistribution."
+  },
+  "runtime": {
+    "python": "3.12",
+    "fast-alpr": {
+      "version": "0.4.0",
+      "source": "https://github.com/ankandrew/fast-alpr/tree/v0.4.0",
+      "license": "MIT",
+      "pypiSha256": "a3e835c60fcebe1445ccdd3128da958968866b0df2bfe3960357b78251296499"
+    },
+    "fast-plate-ocr": {
+      "version": "1.1.0",
+      "source": "https://github.com/ankandrew/fast-plate-ocr/tree/v1.1.0",
+      "license": "MIT"
+    },
+    "open-image-models": {
+      "version": "0.5.1",
+      "source": "https://github.com/ankandrew/open-image-models",
+      "license": "MIT"
+    },
+    "onnxruntime": {
+      "version": "1.22.1",
+      "source": "https://github.com/microsoft/onnxruntime",
+      "license": "MIT"
+    }
+  },
+  "artifacts": [
+    {
+      "name": "yolo-v9-s-608-license-plate-end2end",
+      "purpose": "license plate detector",
+      "version": "release asset retrieved 2026-07-23",
+      "filename": "yolo-v9-s-608-license-plates-end2end.onnx",
+      "sourceUrl": "https://github.com/ankandrew/open-image-models/releases/download/assets/yolo-v9-s-608-license-plates-end2end.onnx",
+      "sourceRepository": "https://github.com/ankandrew/open-image-models",
+      "repositoryLicense": "MIT",
+      "weightLicense": "NOT_SEPARATELY_STATED",
+      "trainingDataProvenance": "NOT_DOCUMENTED_IN_RELEASE",
+      "redistributionStatus": "REVIEW_REQUIRED",
+      "sha256": "2b878b38d9aa07b6ddc3ea75c4ffcb39869bc5c218e0a14002f60ab2f7b0be9a",
+      "bytes": 28612350
+    },
+    {
+      "name": "cct-s-v2-global-model",
+      "purpose": "license plate OCR and optional region head",
+      "version": "fast-plate-ocr 1.1.0 model generation",
+      "filename": "cct_s_v2_global.onnx",
+      "sourceUrl": "https://github.com/ankandrew/cnn-ocr-lp/releases/download/arg-plates/cct_s_v2_global.onnx",
+      "sourceRepository": "https://github.com/ankandrew/fast-plate-ocr",
+      "repositoryLicense": "MIT",
+      "weightLicense": "NOT_SEPARATELY_STATED",
+      "trainingDataProvenance": "Release notes state roughly 3x more global training data but do not provide a redistributable dataset manifest.",
+      "redistributionStatus": "REVIEW_REQUIRED",
+      "sha256": "384bbbd2cea3ef54761d3df70822ef3a349ee1a112aeafddbe0e3ba06bc6e47b",
+      "bytes": 5262230
+    },
+    {
+      "name": "cct-s-v2-global-model-config",
+      "purpose": "OCR preprocessing and vocabulary configuration",
+      "version": "fast-plate-ocr 1.1.0 model generation",
+      "filename": "cct_s_v2_global_plate_config.yaml",
+      "sourceUrl": "https://github.com/ankandrew/cnn-ocr-lp/releases/download/arg-plates/cct_s_v2_global_plate_config.yaml",
+      "sourceRepository": "https://github.com/ankandrew/fast-plate-ocr",
+      "repositoryLicense": "MIT",
+      "redistributionStatus": "REVIEW_REQUIRED",
+      "sha256": "0335c74a305173bb6f393efed0fde03cadeaa0b649ed8e19f431016d8232d0a6",
+      "bytes": 1725
+    }
+  ]
+}

@@ -1,0 +1,122 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gatesight"
+version = "0.1.0"
+description = "Capture-first, serverless license-plate recognition for facility gates"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "aws-lambda-powertools[aws-sdk]==3.17.0",
+  "aws-xray-sdk==2.14.0",
+  "boto3==1.40.21",
+  "pydantic==2.11.7",
+  "ulid-py==1.1.0",
+]
+
+[project.optional-dependencies]
+api = [
+  "fastapi==0.139.2",
+  "mangum==0.19.0",
+  "pydantic-settings==2.10.1",
+  "python-multipart==0.0.32",
+  "starlette==1.3.1",
+  "uvicorn==0.35.0",
+]
+recognition = [
+  "fast-alpr==0.4.0",
+  "fast-plate-ocr==1.1.0",
+  "numpy==2.2.6",
+  "onnxruntime==1.22.1",
+  "open-image-models==0.5.1",
+  "opencv-python-headless==4.12.0.88",
+]
+evaluation-challenger = [
+  "paddleocr==3.7.0",
+  "paddlepaddle==3.3.1",
+]
+
+[dependency-groups]
+dev = [
+  "bandit==1.8.6",
+  "boto3-stubs[dynamodb,events,s3,sns,sqs,ssm]==1.40.21",
+  "httpx==0.28.1",
+  "hypothesis==6.138.15",
+  "moto[dynamodb,s3,sqs]==5.1.11",
+  "mypy==1.17.1",
+  "pip-audit==2.9.0",
+  "pytest==9.1.1",
+  "pytest-cov==6.2.1",
+  "ruff==0.12.10",
+]
+
+[tool.setuptools]
+packages = [
+  "gatesight_domain",
+  "gatesight_control_api",
+  "gatesight_recognition_worker",
+  "gatesight_outbox_publisher",
+  "gatesight_visit_projector",
+  "gatesight_security_evaluator",
+  "gatesight_heartbeat_monitor",
+]
+
+[tool.setuptools.package-dir]
+gatesight_domain = "packages/python_domain/gatesight_domain"
+gatesight_control_api = "services/control_api/gatesight_control_api"
+gatesight_recognition_worker = "services/recognition_worker/gatesight_recognition_worker"
+gatesight_outbox_publisher = "services/outbox_publisher/gatesight_outbox_publisher"
+gatesight_visit_projector = "services/visit_projector/gatesight_visit_projector"
+gatesight_security_evaluator = "services/security_evaluator/gatesight_security_evaluator"
+gatesight_heartbeat_monitor = "services/heartbeat_monitor/gatesight_heartbeat_monitor"
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-config --strict-markers"
+testpaths = ["tests", "packages", "services"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["ml/models"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "SIM", "RUF", "PL"]
+ignore = ["S101", "PLR0913", "PLR2004", "PLW0603"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+exclude = ["ml/evaluation/challenger_paddle.py"]
+
+[[tool.mypy.overrides]]
+module = [
+  "fast_alpr.*",
+  "onnxruntime.*",
+  "open_image_models.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+  "gatesight_security_evaluator.*",
+  "gatesight_visit_projector.*",
+]
+disable_error_code = ["arg-type", "assignment"]
+
+[tool.bandit]
+exclude_dirs = ["tests", "ml/fixtures"]
+skips = ["B101"]
+
+[tool.coverage.run]
+branch = true
+source = [
+  "gatesight_domain",
+  "gatesight_recognition_worker.quality",
+]
+
+[tool.coverage.report]
+fail_under = 75
+show_missing = true

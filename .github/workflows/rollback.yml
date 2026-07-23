@@ -1,0 +1,37 @@
+name: rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [dev, prod]
+        required: true
+      previous_worker_image_uri:
+        description: Previously approved immutable ECR image URI by digest
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  rollback-worker:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: Restore prior worker digest
+        run: |
+          case "${{ inputs.previous_worker_image_uri }}" in
+            *@sha256:????????????????????????????????????????????????????????????????) ;;
+            *) echo "An immutable sha256 image URI is required."; exit 2 ;;
+          esac
+          aws lambda update-function-code \
+            --function-name "gatesight-${{ inputs.environment }}-recognition-worker" \
+            --image-uri "${{ inputs.previous_worker_image_uri }}"
+          aws lambda wait function-updated-v2 \
+            --function-name "gatesight-${{ inputs.environment }}-recognition-worker"

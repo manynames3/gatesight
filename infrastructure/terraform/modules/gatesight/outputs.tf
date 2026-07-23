@@ -1,0 +1,10 @@
+output "api_url" { value = aws_apigatewayv2_api.main.api_endpoint }
+output "capture_bucket" { value = aws_s3_bucket.captures.id }
+output "ecr_repository_url" { value = aws_ecr_repository.recognition.repository_url }
+output "cognito_user_pool_id" { value = aws_cognito_user_pool.main.id }
+output "cognito_client_id" { value = aws_cognito_user_pool_client.web.id }
+output "cognito_authority" { value = "https://${aws_cognito_user_pool.main.endpoint}" }
+output "cognito_domain" { value = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${var.aws_region}.amazoncognito.com" }
+output "dashboard_name" { value = aws_cloudwatch_dashboard.operations.dashboard_name }
+output "recognition_queue_url" { value = aws_sqs_queue.recognition.id }
+output "recognition_dlq_url" { value = aws_sqs_queue.recognition_dlq.id }
