@@ -394,6 +394,12 @@ export function CameraStationPage() {
     setMessage("Pending in-memory frames were discarded.");
   };
 
+  const selectFacility = (nextFacilityId: string) => {
+    setFacilityId(nextFacilityId);
+    setStations([]);
+    setStationId("");
+  };
+
   const localTime = facility
     ? new Intl.DateTimeFormat(undefined, {
         dateStyle: "medium",
@@ -521,7 +527,7 @@ export function CameraStationPage() {
               Facility
               <select
                 value={facilityId}
-                onChange={(event) => setFacilityId(event.target.value)}
+                onChange={(event) => selectFacility(event.target.value)}
                 disabled={armed || pending !== null}
               >
                 <option value="">Select facility</option>

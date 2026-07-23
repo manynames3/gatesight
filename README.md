@@ -230,6 +230,20 @@ bash scripts/invite_reviewer.sh
 
 There is no anonymous access, demo credential, or seeded production record.
 
+For the portfolio development environment, seed the Atlanta, Dallas, and San
+Diego facility selectors with entry and exit gates:
+
+```bash
+uv run python scripts/seed_portfolio_locations.py
+uv run python scripts/seed_portfolio_locations.py --apply
+```
+
+The first command previews the records. The second writes only missing records
+to the `gatesight-dev` tables for `tenant_portfolio`; reruns do not create
+duplicates or overwrite conflicting data. Override `AWS_REGION`,
+`GATESIGHT_TABLE_PREFIX`, or `GATESIGHT_TENANT_ID` when targeting another
+non-production environment.
+
 ## Security, privacy, and retention
 
 - S3 Block Public Access, Bucket Owner Enforced ownership, TLS-only policy, versioning, KMS encryption, lifecycle expiration, and POST policies constrained by exact key/MIME/size.
