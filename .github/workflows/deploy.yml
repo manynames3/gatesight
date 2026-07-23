@@ -35,7 +35,7 @@ jobs:
         with: { node-version: "22", cache: npm, cache-dependency-path: apps/web/package-lock.json }
       - uses: hashicorp/setup-terraform@v3
         with: { terraform_version: "1.14.9" }
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
