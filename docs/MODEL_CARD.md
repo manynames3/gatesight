@@ -39,4 +39,9 @@ Monitor recognition state rates, review rate, no-plate rate, processing duration
 
 ## Release gate
 
-The code repositories advertise MIT, but separate weight redistribution and dataset provenance terms were not found on the release pages. Proprietary production redistribution is blocked until confirmation and legal approval change each artifact to `APPROVED`.
+The code repositories advertise MIT and publish the selected pretrained assets for
+inference. A non-commercial portfolio deployment may keep the verified weights inside
+a private ECR image. Separate weight redistribution and complete dataset-provenance
+terms were not found on the release pages, so commercial use and redistribution remain
+blocked until confirmation and legal approval change the release gate and each artifact
+to `APPROVED`.

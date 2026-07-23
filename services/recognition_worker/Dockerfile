@@ -10,8 +10,18 @@ COPY packages/python_domain/gatesight_domain "${LAMBDA_TASK_ROOT}/gatesight_doma
 COPY services/recognition_worker/gatesight_recognition_worker "${LAMBDA_TASK_ROOT}/gatesight_recognition_worker"
 COPY ml/download_models.py ml/model-manifest.json /build/ml/
 
+ARG GATESIGHT_MODEL_RELEASE_SCOPE=portfolio
 RUN mkdir -p /opt/models \
-    && python /build/ml/download_models.py --manifest /build/ml/model-manifest.json --output /opt/models --verify
+    && case "${GATESIGHT_MODEL_RELEASE_SCOPE}" in \
+      portfolio) RELEASE_FLAG=--require-portfolio-scope ;; \
+      commercial) RELEASE_FLAG=--require-redistribution-approval ;; \
+      *) echo "Unsupported model release scope: ${GATESIGHT_MODEL_RELEASE_SCOPE}" >&2; exit 2 ;; \
+    esac \
+    && python /build/ml/download_models.py \
+      --manifest /build/ml/model-manifest.json \
+      --output /opt/models \
+      --verify \
+      "${RELEASE_FLAG}"
 
 FROM public.ecr.aws/lambda/python:3.12@sha256:0628ddc11919f85f4261517d356392dbbc6b3181568d87a376ae2e814464c230
 COPY --from=build "${LAMBDA_TASK_ROOT}" "${LAMBDA_TASK_ROOT}"

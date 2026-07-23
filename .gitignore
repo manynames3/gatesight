@@ -25,4 +25,5 @@ private-evaluation/
 *.tfstate.*
 .terraform/
 terraform.tfvars
+backend.hcl
 crash.log

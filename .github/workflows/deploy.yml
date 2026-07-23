@@ -45,18 +45,31 @@ jobs:
       - run: uv sync --frozen --extra api --extra recognition --group dev
       - run: make test-unit
       - run: make build-lambdas
-      - name: Enforce model redistribution approval
-        run: >-
-          uv run python ml/download_models.py
-          --manifest ml/model-manifest.json
-          --output build/models
-          --verify
-          --require-redistribution-approval
+      - name: Select and enforce model release scope
+        run: |
+          if [[ "$ENVIRONMENT" == "prod" ]]; then
+            MODEL_RELEASE_SCOPE="commercial"
+            RELEASE_FLAG="--require-redistribution-approval"
+          else
+            MODEL_RELEASE_SCOPE="portfolio"
+            RELEASE_FLAG="--require-portfolio-scope"
+          fi
+          uv run python ml/download_models.py \
+            --manifest ml/model-manifest.json \
+            --output build/models \
+            --verify \
+            "$RELEASE_FLAG"
+          echo "MODEL_RELEASE_SCOPE=$MODEL_RELEASE_SCOPE" >> "$GITHUB_ENV"
       - name: Build and push immutable worker
         env:
           ECR_REPOSITORY_URL: ${{ vars.ECR_REPOSITORY_URL }}
         run: |
-          docker build --platform linux/amd64 -f services/recognition_worker/Dockerfile -t "$ECR_REPOSITORY_URL:${GITHUB_SHA}" .
+          docker build \
+            --platform linux/amd64 \
+            --build-arg "GATESIGHT_MODEL_RELEASE_SCOPE=$MODEL_RELEASE_SCOPE" \
+            -f services/recognition_worker/Dockerfile \
+            -t "$ECR_REPOSITORY_URL:${GITHUB_SHA}" \
+            .
           docker push "$ECR_REPOSITORY_URL:${GITHUB_SHA}"
           DIGEST="$(aws ecr describe-images --repository-name "${ECR_REPOSITORY_URL##*/}" --image-ids imageTag="$GITHUB_SHA" --query 'imageDetails[0].imageDigest' --output text)"
           cosign sign --yes "$ECR_REPOSITORY_URL@$DIGEST"

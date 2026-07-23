@@ -344,10 +344,13 @@ Production deployment is credential- and approval-dependent. The workflow uses G
 
 Exact variable examples are in each environment directory. Terraform defaults to `us-east-1` but accepts another region.
 
-The deployment workflow enforces `--require-redistribution-approval` before any
-image push and therefore fails intentionally until the weight terms are approved.
-After approval, it publishes by immutable digest, signs that digest keylessly with
-Cosign through GitHub OIDC, and verifies the signature before Terraform can deploy it.
+The deployment workflow distinguishes non-commercial portfolio use from a commercial
+release. The dev environment enforces `--require-portfolio-scope`, keeps model weights
+inside a private ECR image, and does not publish them in this repository or to the
+browser. The prod environment enforces `--require-redistribution-approval` and fails
+until the exact weight terms are approved. After approval, CI publishes by immutable
+digest, signs that digest keylessly with Cosign through GitHub OIDC, and verifies the
+signature before Terraform can deploy it.
 
 ## Cloudflare Pages
 
@@ -369,7 +372,9 @@ The architecture has no always-running compute, database instance, cluster, NAT 
 - Plate performance is not yet measured on a rights-cleared facility-specific dataset.
 - Regional plate patterns are supporting review evidence, not a correction engine.
 - Timestamp offset estimation is useful but is not a trusted hardware time source.
-- The current model weights require explicit redistribution/provenance approval before a proprietary production release.
+- The current model weights are restricted to the documented non-commercial portfolio
+  deployment; commercial use or redistribution requires explicit rights and provenance
+  approval.
 
 For a permanently unattended gate, the next architectural review should compare this station with a managed kiosk or signed local capture agent that can enforce camera health, OS policy, and supervised restarts.
 

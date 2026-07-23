@@ -2,8 +2,10 @@
   "schemaVersion": "1.0",
   "generatedAt": "2026-07-23T00:00:00Z",
   "releaseGate": {
-    "status": "REVIEW_REQUIRED",
-    "reason": "The source repositories are MIT-licensed, but their release pages do not state separate redistribution terms or training-dataset provenance for these weight files. Obtain written confirmation from the maintainer and legal approval before proprietary redistribution."
+    "status": "PORTFOLIO_ONLY",
+    "deploymentClassification": "NON_COMMERCIAL_PORTFOLIO",
+    "commercialReleaseStatus": "REVIEW_REQUIRED",
+    "reason": "The source repositories are MIT-licensed and publish these exact pretrained assets for inference, which supports a private-image non-commercial portfolio deployment. The release pages do not separately state weight redistribution terms or complete training-dataset provenance, so commercial use and redistribution remain blocked pending written confirmation and legal review."
   },
   "runtime": {
     "python": "3.12",
