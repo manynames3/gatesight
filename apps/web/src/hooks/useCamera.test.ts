@@ -1,10 +1,14 @@
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { useCamera } from "./useCamera";
 
 type TrackFixture = MediaStreamTrack & {
   end: () => void;
+  stopCount: () => number;
 };
+type GetUserMediaMock = Mock<
+  (constraints: MediaStreamConstraints) => Promise<MediaStream>
+>;
 
 function track(
   settings: MediaTrackSettings = {
@@ -14,6 +18,7 @@ function track(
   },
 ): TrackFixture {
   let ended: (() => void) | undefined;
+  let stops = 0;
   return {
     addEventListener: vi.fn((name: string, listener: EventListenerOrEventListenerObject) => {
       if (name === "ended") {
@@ -25,7 +30,10 @@ function track(
     }),
     end: () => ended?.(),
     getSettings: () => settings,
-    stop: vi.fn(),
+    stop: () => {
+      stops += 1;
+    },
+    stopCount: () => stops,
   } as unknown as TrackFixture;
 }
 
@@ -47,7 +55,7 @@ function device(deviceId: string): MediaDeviceInfo {
 }
 
 function installMediaDevices(
-  getUserMedia: ReturnType<typeof vi.fn>,
+  getUserMedia: GetUserMediaMock,
   cameras: MediaDeviceInfo[] = [],
 ) {
   let deviceChange: (() => void) | undefined;
@@ -105,6 +113,32 @@ describe("useCamera", () => {
     expect(result.current.permission).toBe("granted");
     expect(result.current.selectedDeviceId).toBe("camera-a");
     expect(result.current.devices).toHaveLength(2);
+  });
+
+  it("switches to the selected physical camera", async () => {
+    const firstTrack = track({ deviceId: "camera-a", width: 1920, height: 1080 });
+    const secondTrack = track({ deviceId: "camera-b", width: 1920, height: 1080 });
+    const getUserMedia = vi
+      .fn<(constraints: MediaStreamConstraints) => Promise<MediaStream>>()
+      .mockResolvedValueOnce(stream(firstTrack))
+      .mockResolvedValueOnce(stream(secondTrack));
+    installMediaDevices(getUserMedia, [device("camera-a"), device("camera-b")]);
+    const { result } = renderHook(() => useCamera());
+
+    await act(() => result.current.start());
+    await act(() => result.current.select("camera-b"));
+
+    expect(getUserMedia.mock.lastCall?.[0]).toEqual({
+      audio: false,
+      video: {
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        facingMode: { ideal: "environment" },
+        deviceId: { exact: "camera-b" },
+      },
+    });
+    expect(firstTrack.stopCount()).toBe(1);
+    expect(result.current.selectedDeviceId).toBe("camera-b");
   });
 
   it("warns on low resolution and surfaces disconnection", async () => {

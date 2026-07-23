@@ -44,8 +44,25 @@ export function useCamera() {
   }, []);
 
   const refreshDevices = useCallback(async () => {
-    const mediaDevices = await navigator.mediaDevices.enumerateDevices();
-    setDevices(mediaDevices.filter((device) => device.kind === "videoinput"));
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      setDevices([]);
+      return [] as MediaDeviceInfo[];
+    }
+    try {
+      const mediaDevices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = mediaDevices.filter(
+        (device) => device.kind === "videoinput" && device.deviceId,
+      );
+      setDevices(cameras);
+      return cameras;
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The camera list could not be refreshed.",
+      );
+      return [] as MediaDeviceInfo[];
+    }
   }, []);
 
   const start = useCallback(
@@ -90,15 +107,20 @@ export function useCamera() {
   useEffect(() => {
     if (!navigator.mediaDevices) return;
     const changed = async () => {
-      const mediaDevices = await navigator.mediaDevices.enumerateDevices();
-      const cameras = mediaDevices.filter((device) => device.kind === "videoinput");
-      setDevices(cameras);
       const selected = selectedDeviceIdRef.current;
+      const cameras = await refreshDevices();
       const selectedStillExists = cameras.some(
         (device) => device.deviceId === selected,
       );
-      if (selected && !selectedStillExists) setPermission("disconnected");
+      if (
+        selected &&
+        selectedDeviceIdRef.current === selected &&
+        !selectedStillExists
+      ) {
+        setPermission("disconnected");
+      }
     };
+    void changed();
     const deviceChangeListener = () => void changed();
     navigator.mediaDevices.addEventListener("devicechange", deviceChangeListener);
     return () => {
@@ -108,7 +130,16 @@ export function useCamera() {
       );
       stop();
     };
-  }, [stop]);
+  }, [refreshDevices, stop]);
+
+  const select = useCallback(
+    async (deviceId: string) => {
+      selectedDeviceIdRef.current = deviceId;
+      setSelectedDeviceId(deviceId);
+      await start(deviceId || undefined);
+    },
+    [start],
+  );
 
   return {
     videoRef,
@@ -123,10 +154,7 @@ export function useCamera() {
     error,
     start,
     stop,
-    select: (deviceId: string) => {
-      selectedDeviceIdRef.current = deviceId;
-      setSelectedDeviceId(deviceId);
-      void start(deviceId);
-    },
+    refreshDevices,
+    select,
   };
 }

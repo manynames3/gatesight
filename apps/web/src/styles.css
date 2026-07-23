@@ -49,8 +49,15 @@ button { cursor: pointer; }
 .plate-region::before { left: -3px; border-left: 3px solid white; }.plate-region::after { right: -3px; border-right: 3px solid white; }
 .plate-region span { position: absolute; bottom: -26px; left: 50%; transform: translateX(-50%); color: white; font: 500 10px ui-monospace, monospace; white-space: nowrap; }
 .camera-overlay { position: absolute; inset: 18px 18px auto; display: flex; justify-content: space-between; color: white; font: 500 11px ui-monospace, monospace; text-shadow: 0 1px 5px black; }
-.camera-actions { display: flex; gap: 10px; padding: 16px; border-top: 1px solid var(--line); }
+.camera-actions { display: grid; gap: 14px; padding: 16px; border-top: 1px solid var(--line); }
 .camera-actions button { min-height: 48px; }
+.camera-source-picker { display: grid; gap: 7px; }
+.camera-source-picker > label { color: var(--muted); font-size: 12px; }
+.camera-source-picker p { color: var(--muted); font-size: 12px; margin: 0; }
+.camera-source-row, .camera-action-buttons { display: flex; gap: 10px; }
+.camera-source-row select { min-width: 0; }
+.camera-source-row .secondary-button { white-space: nowrap; }
+.camera-action-buttons .primary-button { flex: 1; }
 .capture-button { flex: 1; background: var(--lime); color: #111713; border: 0; font-weight: 700; }
 .primary-button, .secondary-button, .danger-button { min-height: 44px; padding: 0 18px; border-radius: 3px; font-weight: 700; }
 .primary-button { background: var(--lime); border: 1px solid var(--lime); color: #111713; }

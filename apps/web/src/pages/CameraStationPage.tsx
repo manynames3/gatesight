@@ -50,6 +50,7 @@ export function CameraStationPage() {
     lowResolution: cameraLowResolution,
     error: cameraError,
     start: startCamera,
+    refreshDevices: refreshCameras,
     select: selectCamera,
   } = useCamera();
   const [facilities, setFacilities] = useState<Facility[]>([]);
@@ -379,24 +380,64 @@ export function CameraStationPage() {
           <canvas ref={captureCanvasRef} hidden />
           <canvas ref={motionCanvasRef} hidden />
           <div className="camera-actions">
-            {cameraPermission !== "granted" ? (
-              <button type="button" className="primary-button" onClick={() => void startCamera()}>
-                Enable camera
-              </button>
-            ) : (
-              <>
-                <button type="button" className="capture-button" disabled={busy} onClick={() => void captureNow()}>
-                  {busy ? "Capturing / uploading…" : "Capture now"}
-                </button>
+            <div className="camera-source-picker">
+              <label htmlFor="camera-source">Camera source</label>
+              <div className="camera-source-row">
+                <select
+                  id="camera-source"
+                  value={cameraDeviceId}
+                  onChange={(event) => void selectCamera(event.target.value)}
+                  disabled={armed || cameraPermission === "requesting"}
+                >
+                  <option value="">Automatic (rear camera preferred)</option>
+                  {cameras.map((device, index) => (
+                    <option key={device.deviceId} value={device.deviceId}>
+                      {device.label || `Camera ${index + 1}`}
+                    </option>
+                  ))}
+                </select>
                 <button
                   type="button"
-                  className={armed ? "danger-button" : "secondary-button"}
-                  onClick={() => (armed ? disarm() : void arm())}
+                  className="secondary-button"
+                  onClick={() => void refreshCameras()}
+                  disabled={armed || cameraPermission === "requesting"}
                 >
-                  {armed ? "Disarm automatic capture" : "Arm automatic capture"}
+                  Refresh
                 </button>
-              </>
-            )}
+              </div>
+              <p>
+                {cameraPermission === "granted"
+                  ? "Choose any camera connected to this device."
+                  : "Enable access once to reveal camera names, then choose the source."}
+              </p>
+            </div>
+            <div className="camera-action-buttons">
+              {cameraPermission !== "granted" ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => void startCamera(cameraDeviceId || undefined)}
+                  disabled={cameraPermission === "requesting"}
+                >
+                  {cameraPermission === "requesting"
+                    ? "Requesting camera access…"
+                    : "Enable camera & find devices"}
+                </button>
+              ) : (
+                <>
+                  <button type="button" className="capture-button" disabled={busy} onClick={() => void captureNow()}>
+                    {busy ? "Capturing / uploading…" : "Capture now"}
+                  </button>
+                  <button
+                    type="button"
+                    className={armed ? "danger-button" : "secondary-button"}
+                    onClick={() => (armed ? disarm() : void arm())}
+                  >
+                    {armed ? "Disarm automatic capture" : "Arm automatic capture"}
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -415,12 +456,6 @@ export function CameraStationPage() {
               <select value={stationId} onChange={(event) => setStationId(event.target.value)} disabled={armed}>
                 <option value="">Select station</option>
                 {stations.map((item) => <option key={item.recordId} value={item.recordId}>{item.name} · {item.direction}</option>)}
-              </select>
-            </label>
-            <label>
-              Physical camera
-              <select value={cameraDeviceId} onChange={(event) => selectCamera(event.target.value)} disabled={armed || cameraPermission !== "granted"}>
-                {cameras.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>)}
               </select>
             </label>
             <dl className="detail-list">
