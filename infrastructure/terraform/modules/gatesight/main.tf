@@ -36,6 +36,27 @@ data "aws_iam_policy_document" "kms" {
       identifiers = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"]
     }
   }
+  statement {
+    sid    = "AllowCloudWatchLogsEncryption"
+    effect = "Allow"
+    actions = [
+      "kms:Decrypt",
+      "kms:DescribeKey",
+      "kms:Encrypt",
+      "kms:GenerateDataKey*",
+      "kms:ReEncrypt*",
+    ]
+    resources = ["*"]
+    principals {
+      type        = "Service"
+      identifiers = ["logs.${var.aws_region}.amazonaws.com"]
+    }
+    condition {
+      test     = "ArnLike"
+      variable = "kms:EncryptionContext:aws:logs:arn"
+      values   = ["arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/*"]
+    }
+  }
 }
 
 resource "aws_kms_alias" "data" {
@@ -236,10 +257,6 @@ resource "aws_dynamodb_table" "domain" {
     type = "S"
   }
   attribute {
-    name = "capturedAt"
-    type = "S"
-  }
-  attribute {
     name = "authorizationScope"
     type = "S"
   }
@@ -259,9 +276,12 @@ resource "aws_dynamodb_table" "domain" {
     name = "entryAt"
     type = "S"
   }
-  attribute {
-    name = "occurredAt"
-    type = "S"
+  dynamic "attribute" {
+    for_each = contains(["visits"], each.key) ? [] : [contains(["alerts"], each.key) ? "occurredAt" : "capturedAt"]
+    content {
+      name = attribute.value
+      type = "S"
+    }
   }
 
   global_secondary_index {

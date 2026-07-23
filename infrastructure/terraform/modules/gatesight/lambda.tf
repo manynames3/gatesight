@@ -191,7 +191,7 @@ resource "aws_lambda_function" "control_api" {
   timeout                        = 29
   architectures                  = ["arm64"]
   kms_key_arn                    = aws_kms_key.data.arn
-  reserved_concurrent_executions = 20
+  reserved_concurrent_executions = local.is_production ? 20 : -1
   tracing_config { mode = "Active" }
   environment {
     variables = {
@@ -221,11 +221,11 @@ resource "aws_lambda_function" "recognition" {
   role                           = aws_iam_role.lambda["recognition-worker"].arn
   package_type                   = "Image"
   image_uri                      = var.worker_image_uri
-  memory_size                    = 4096
+  memory_size                    = local.is_production ? 4096 : 3008
   timeout                        = 120
   architectures                  = ["x86_64"]
   kms_key_arn                    = aws_kms_key.data.arn
-  reserved_concurrent_executions = 10
+  reserved_concurrent_executions = local.is_production ? 10 : -1
   ephemeral_storage { size = 1024 }
   tracing_config { mode = "Active" }
   environment {
@@ -248,7 +248,7 @@ resource "aws_lambda_event_source_mapping" "recognition" {
   batch_size                         = 1
   maximum_batching_window_in_seconds = 0
   function_response_types            = ["ReportBatchItemFailures"]
-  scaling_config { maximum_concurrency = 10 }
+  scaling_config { maximum_concurrency = local.is_production ? 10 : 2 }
 }
 
 locals {
@@ -274,7 +274,7 @@ resource "aws_lambda_function" "consumer" {
   timeout                        = 30
   architectures                  = ["arm64"]
   kms_key_arn                    = aws_kms_key.data.arn
-  reserved_concurrent_executions = each.key == "heartbeat-monitor" ? 1 : 10
+  reserved_concurrent_executions = local.is_production ? (each.key == "heartbeat-monitor" ? 1 : 10) : -1
   tracing_config { mode = "Active" }
   environment {
     variables = {

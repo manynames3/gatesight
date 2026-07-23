@@ -27,3 +27,4 @@ private-evaluation/
 terraform.tfvars
 backend.hcl
 crash.log
+tfplan
