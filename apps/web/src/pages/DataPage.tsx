@@ -39,10 +39,10 @@ const pageConfiguration = {
 } as const;
 
 export function DataPage({ path }: { path: keyof typeof pageConfiguration }) {
-  const { user } = useAuth();
+  const { getAccessToken } = useAuth();
   const api = useMemo(
-    () => new ApiClient(import.meta.env.VITE_API_ORIGIN, () => user?.access_token),
-    [user],
+    () => new ApiClient(import.meta.env.VITE_API_ORIGIN, getAccessToken),
+    [getAccessToken],
   );
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [facilityId, setFacilityId] = useState("");

@@ -1,0 +1,74 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiClient } from "./client";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("ApiClient authentication", () => {
+  it("refreshes the token and retries once after a 401", async () => {
+    const token = vi
+      .fn<(forceRefresh?: boolean) => Promise<string | undefined>>()
+      .mockResolvedValueOnce("expired-token")
+      .mockResolvedValueOnce("renewed-token");
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: "Unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            serverTime: "2026-07-23T22:00:00Z",
+            unixTimeMs: 1_774_214_400_000,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test", token);
+
+    await expect(client.getServerTime()).resolves.toEqual({
+      serverTime: "2026-07-23T22:00:00Z",
+      unixTimeMs: 1_774_214_400_000,
+    });
+
+    expect(token.mock.calls).toEqual([[false], [true]]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    const retryHeaders = new Headers(fetchMock.mock.calls[1]?.[1]?.headers);
+    expect(firstHeaders.get("Authorization")).toBe("Bearer expired-token");
+    expect(retryHeaders.get("Authorization")).toBe("Bearer renewed-token");
+  });
+
+  it("does not retry a successful authenticated request", async () => {
+    const token = vi
+      .fn<(forceRefresh?: boolean) => Promise<string | undefined>>()
+      .mockResolvedValue("current-token");
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          serverTime: "2026-07-23T22:00:00Z",
+          unixTimeMs: 1_774_214_400_000,
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test", token);
+
+    await client.getServerTime();
+
+    expect(token.mock.calls).toEqual([[false]]);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+});

@@ -20,7 +20,9 @@ export class ApiError extends Error {
 export class ApiClient {
   constructor(
     private readonly origin: string,
-    private readonly token: () => string | undefined,
+    private readonly token: (
+      forceRefresh?: boolean,
+    ) => Promise<string | undefined> | string | undefined,
   ) {}
 
   private async request<T>(
@@ -28,32 +30,36 @@ export class ApiClient {
     init: RequestInit = {},
     idempotencyKey?: string,
   ): Promise<T> {
-    const token = this.token();
-    const headers = new Headers(init.headers);
-    headers.set("Accept", "application/json");
-    if (init.body) headers.set("Content-Type", "application/json");
-    if (token) headers.set("Authorization", `Bearer ${token}`);
-    if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
-    const response = await fetch(`${this.origin}${path}`, {
-      ...init,
-      headers,
-      credentials: "omit",
-      cache: "no-store",
-    });
-    if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as {
-        error?: { code?: string; message?: string };
-        correlationId?: string;
-      };
-      throw new ApiError(
-        body.error?.message ?? `Request failed (${response.status})`,
-        response.status,
-        body.error?.code ?? "REQUEST_FAILED",
-        body.correlationId ?? response.headers.get("x-correlation-id"),
-      );
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const accessToken = await this.token(attempt === 1);
+      const headers = new Headers(init.headers);
+      headers.set("Accept", "application/json");
+      if (init.body) headers.set("Content-Type", "application/json");
+      if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+      if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
+      const response = await fetch(`${this.origin}${path}`, {
+        ...init,
+        headers,
+        credentials: "omit",
+        cache: "no-store",
+      });
+      if (response.status === 401 && attempt === 0) continue;
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as {
+          error?: { code?: string; message?: string };
+          correlationId?: string;
+        };
+        throw new ApiError(
+          body.error?.message ?? `Request failed (${response.status})`,
+          response.status,
+          body.error?.code ?? "REQUEST_FAILED",
+          body.correlationId ?? response.headers.get("x-correlation-id"),
+        );
+      }
+      if (response.status === 204) return undefined as T;
+      return (await response.json()) as T;
     }
-    if (response.status === 204) return undefined as T;
-    return (await response.json()) as T;
+    throw new ApiError("Authentication could not be renewed", 401, "UNAUTHORIZED", null);
   }
 
   getServerTime(): Promise<{ serverTime: string; unixTimeMs: number }> {

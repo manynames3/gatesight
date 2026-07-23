@@ -76,9 +76,11 @@ select { width: 100%; color: var(--ink); background: #0d1412; border: 1px solid 
 .checkbox-label input { accent-color: var(--lime); margin-top: 3px; }
 .fine-print, .muted { color: var(--muted); font-size: 12px; line-height: 1.5; }
 .field-error { color: var(--red); font-size: 12px; }
-.error-panel, .review-warning { padding: 13px 15px; border: 1px solid #7c3734; background: #2a1716; color: #ffc3bf; margin: 0 0 16px; border-radius: 3px; }
+.error-panel, .review-warning, .success-panel { padding: 13px 15px; border: 1px solid #7c3734; background: #2a1716; color: #ffc3bf; margin: 0 0 16px; border-radius: 3px; }
 .review-warning { border-color: #6a4e1e; background: #2d2517; color: #ffd894; }
+.success-panel { border-color: #54752a; background: #1b2a18; color: var(--lime); }
 .card-title-row { display: flex; align-items: center; justify-content: space-between; }
+.card-actions { display: flex; gap: 14px; }
 .text-button { color: var(--lime); background: none; border: 0; padding: 0; text-align: left; }
 .progress-row { display: grid; grid-template-columns: 55px 1fr 35px; gap: 8px; align-items: center; font: 500 10px ui-monospace, monospace; margin: 8px 0; }
 progress { width: 100%; accent-color: var(--lime); }

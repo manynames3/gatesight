@@ -4,10 +4,10 @@ import { ApiClient } from "../api/client";
 import type { Facility, Station } from "../api/generated";
 
 export function FacilitiesPage() {
-  const { user } = useAuth();
+  const { getAccessToken } = useAuth();
   const api = useMemo(
-    () => new ApiClient(import.meta.env.VITE_API_ORIGIN, () => user?.access_token),
-    [user],
+    () => new ApiClient(import.meta.env.VITE_API_ORIGIN, getAccessToken),
+    [getAccessToken],
   );
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [stations, setStations] = useState<Record<string, Station[]>>({});

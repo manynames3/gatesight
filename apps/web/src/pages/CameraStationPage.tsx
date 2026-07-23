@@ -17,8 +17,8 @@ import { useCamera } from "../hooks/useCamera";
 const region = { x: 0.18, y: 0.52, width: 0.64, height: 0.25 };
 const terminalNeedsReview = new Set(["NEEDS_REVIEW", "MULTIPLE_PLATES"]);
 
-function randomKey(prefix: string) {
-  return `${prefix}:${crypto.randomUUID()}`;
+function captureKey(prefix: string, burstId: string) {
+  return `${prefix}:${burstId}`;
 }
 
 async function cameraHash(deviceId: string): Promise<string | null> {
@@ -28,14 +28,15 @@ async function cameraHash(deviceId: string): Promise<string | null> {
 }
 
 export function CameraStationPage() {
-  const { user } = useAuth();
+  const { getAccessToken } = useAuth();
   const api = useMemo(
-    () => new ApiClient(import.meta.env.VITE_API_ORIGIN, () => user?.access_token),
-    [user],
+    () => new ApiClient(import.meta.env.VITE_API_ORIGIN, getAccessToken),
+    [getAccessToken],
   );
   const captureCanvasRef = useRef<HTMLCanvasElement>(null);
   const motionCanvasRef = useRef<HTMLCanvasElement>(null);
   const uploadAbortRef = useRef<AbortController | null>(null);
+  const pollAbortRef = useRef<AbortController | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const detectorRef = useRef(new MotionDetector());
   const motionSeenAtRef = useRef<number | null>(null);
@@ -70,6 +71,7 @@ export function CameraStationPage() {
   const [progress, setProgress] = useState<number[]>([]);
   const [captureResult, setCaptureResult] = useState<CaptureResult | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const station = stations.find((item) => item.recordId === stationId);
@@ -128,6 +130,14 @@ export function CameraStationPage() {
     window.addEventListener("beforeunload", beforeUnload);
     return () => window.removeEventListener("beforeunload", beforeUnload);
   }, [pending]);
+
+  useEffect(
+    () => () => {
+      uploadAbortRef.current?.abort();
+      pollAbortRef.current?.abort();
+    },
+    [],
+  );
 
   const syncClock = useCallback(async () => {
     const samples: Array<{ latency: number; offset: number }> = [];
@@ -227,7 +237,7 @@ export function CameraStationPage() {
           capturedAtClient: burst.capturedAt.toISOString(),
           clientClockOffsetMs: clockOffsetMs,
         },
-        randomKey("create"),
+        captureKey("create", burst.id),
       );
       await Promise.all(
         session.uploads.map(async (upload, index) => {
@@ -243,12 +253,26 @@ export function CameraStationPage() {
       await api.completeCapture(
         session.captureId,
         session.uploads.map((upload) => upload.key),
-        randomKey("complete"),
+        captureKey("complete", burst.id),
       );
       setPending(null);
+      setProgress([]);
+      setCaptureResult({ recordId: session.captureId, status: "QUEUED" });
+      setSaveNotice(`Capture ${session.captureId} is verified in AWS.`);
+      pollAbortRef.current?.abort();
       const pollAbort = new AbortController();
-      uploadAbortRef.current = pollAbort;
-      await pollCapture(api, session.captureId, pollAbort.signal, setCaptureResult);
+      pollAbortRef.current = pollAbort;
+      void pollCapture(api, session.captureId, pollAbort.signal, setCaptureResult)
+        .catch((error: unknown) => {
+          if (!(error instanceof DOMException && error.name === "AbortError")) {
+            setSaveNotice(
+              `Capture ${session.captureId} is saved in AWS; recognition status is temporarily unavailable.`,
+            );
+          }
+        })
+        .finally(() => {
+          if (pollAbortRef.current === pollAbort) pollAbortRef.current = null;
+        });
     },
     [api, clockOffsetMs, facility, station],
   );
@@ -262,10 +286,21 @@ export function CameraStationPage() {
     ) {
       return;
     }
+    if (!online) {
+      setMessage("Capture paused while offline. No image was taken.");
+      return;
+    }
+    if (!facility || !station) {
+      setMessage("Select a facility and station before capturing.");
+      return;
+    }
     setBusy(true);
     setMessage(null);
+    setSaveNotice(null);
     setCaptureResult(null);
+    let burst: PendingBurst | null = null;
     try {
+      await api.getServerTime();
       const capturedAt = new Date();
       const frames = await captureBurst(
         streamRef.current,
@@ -274,19 +309,45 @@ export function CameraStationPage() {
         4,
         250,
       );
-      const burst = { id: crypto.randomUUID(), capturedAt, frames };
+      burst = { id: crypto.randomUUID(), capturedAt, frames };
       setPending(burst);
       lastCaptureAtRef.current = Date.now();
       await processBurst(burst);
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
-        setMessage(error instanceof Error ? error.message : "Capture failed");
+        const reason = error instanceof Error ? error.message : "Capture failed";
+        setMessage(
+          burst
+            ? `Capture is retained in this tab but is not yet verified in AWS: ${reason}`
+            : `No image was taken: ${reason}`,
+        );
       }
     } finally {
       uploadAbortRef.current = null;
       setBusy(false);
     }
-  }, [busy, processBurst, streamRef, videoRef]);
+  }, [api, busy, facility, online, processBurst, station, streamRef, videoRef]);
+
+  const retryPending = useCallback(async () => {
+    if (!pending || busy || !online) return;
+    setBusy(true);
+    setMessage(null);
+    setSaveNotice(null);
+    try {
+      await api.getServerTime();
+      await processBurst(pending);
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        const reason = error instanceof Error ? error.message : "Upload failed";
+        setMessage(
+          `Capture is retained in this tab but is not yet verified in AWS: ${reason}`,
+        );
+      }
+    } finally {
+      uploadAbortRef.current = null;
+      setBusy(false);
+    }
+  }, [api, busy, online, pending, processBurst]);
 
   useEffect(() => {
     if (!armed) return;
@@ -359,6 +420,7 @@ export function CameraStationPage() {
       </header>
 
       {message && <div className="error-panel" role="alert">{message}</div>}
+      {saveNotice && <div className="success-panel" role="status">{saveNotice}</div>}
       {captureResult && terminalNeedsReview.has(captureResult.status) && (
         <div className="review-warning" role="status">
           This result needs human review. It cannot create an unregistered-vehicle alert.
@@ -425,8 +487,19 @@ export function CameraStationPage() {
                 </button>
               ) : (
                 <>
-                  <button type="button" className="capture-button" disabled={busy} onClick={() => void captureNow()}>
-                    {busy ? "Capturing / uploading…" : "Capture now"}
+                  <button
+                    type="button"
+                    className="capture-button"
+                    disabled={busy || !online || !facility || !station}
+                    onClick={() => void captureNow()}
+                  >
+                    {busy
+                      ? "Capturing / uploading…"
+                      : !online
+                        ? "Waiting for network"
+                        : !facility || !station
+                          ? "Select a station to capture"
+                          : "Capture now"}
                   </button>
                   <button
                     type="button"
@@ -446,14 +519,22 @@ export function CameraStationPage() {
             <h2>Station assignment</h2>
             <label>
               Facility
-              <select value={facilityId} onChange={(event) => setFacilityId(event.target.value)} disabled={armed}>
+              <select
+                value={facilityId}
+                onChange={(event) => setFacilityId(event.target.value)}
+                disabled={armed || pending !== null}
+              >
                 <option value="">Select facility</option>
                 {facilities.map((item) => <option key={item.recordId} value={item.recordId}>{item.name}</option>)}
               </select>
             </label>
             <label>
               Logical gate
-              <select value={stationId} onChange={(event) => setStationId(event.target.value)} disabled={armed}>
+              <select
+                value={stationId}
+                onChange={(event) => setStationId(event.target.value)}
+                disabled={armed || pending !== null}
+              >
                 <option value="">Select station</option>
                 {stations.map((item) => <option key={item.recordId} value={item.recordId}>{item.name} · {item.direction}</option>)}
               </select>
@@ -500,7 +581,21 @@ export function CameraStationPage() {
             <section className="control-card">
               <div className="card-title-row">
                 <h2>In-memory burst</h2>
-                {pending && <button type="button" className="text-button" onClick={discard}>Discard</button>}
+                {pending && (
+                  <div className="card-actions">
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => void retryPending()}
+                      disabled={busy || !online}
+                    >
+                      {busy ? "Saving…" : "Retry AWS save"}
+                    </button>
+                    <button type="button" className="text-button" onClick={discard}>
+                      Discard
+                    </button>
+                  </div>
+                )}
               </div>
               {progress.map((value, index) => (
                 <div className="progress-row" key={`frame-${index}`}>

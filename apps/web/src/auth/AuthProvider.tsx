@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type PropsWithChildren,
 } from "react";
@@ -13,6 +14,7 @@ interface AuthValue {
   user: User | null;
   ready: boolean;
   configured: boolean;
+  getAccessToken: (forceRefresh?: boolean) => Promise<string | undefined>;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -34,7 +36,8 @@ function makeManager(): UserManager | null {
     post_logout_redirect_uri: logoutUri,
     response_type: "code",
     scope: "openid email profile",
-    automaticSilentRenew: false,
+    automaticSilentRenew: true,
+    accessTokenExpiringNotificationTimeInSeconds: 60,
     userStore: new WebStorageStateStore({ store: window.sessionStorage }),
     stateStore: new WebStorageStateStore({ store: window.sessionStorage }),
     monitorSession: false,
@@ -45,6 +48,40 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const manager = useMemo(() => makeManager(), []);
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
+  const renewalRef = useRef<Promise<User | null> | null>(null);
+
+  const renewSession = useCallback(async () => {
+    if (!manager) return null;
+    renewalRef.current ??= manager
+      .signinSilent()
+      .then((renewed) => {
+        setUser(renewed);
+        return renewed;
+      })
+      .catch(() => null);
+    try {
+      return await renewalRef.current;
+    } finally {
+      renewalRef.current = null;
+    }
+  }, [manager]);
+
+  const getAccessToken = useCallback(
+    async (forceRefresh = false) => {
+      if (!manager) return undefined;
+      let current = await manager.getUser(false);
+      const expiresSoon = current?.expires_in !== undefined && current.expires_in <= 60;
+      if (current && (forceRefresh || current.expired || expiresSoon)) {
+        current = await renewSession();
+      }
+      if (!current || current.expired) return undefined;
+      setUser((existing) =>
+        existing?.access_token === current.access_token ? existing : current,
+      );
+      return current.access_token;
+    },
+    [manager, renewSession],
+  );
 
   useEffect(() => {
     let active = true;
@@ -57,15 +94,28 @@ export function AuthProvider({ children }: PropsWithChildren) {
         await manager.signinRedirectCallback();
         window.history.replaceState({}, "", "/station");
       }
-      const restored = await manager.getUser();
+      let restored = await manager.getUser();
+      if (restored?.expired) restored = await renewSession();
       if (active) {
-        setUser(restored?.expired ? null : restored);
+        setUser(restored);
         setReady(true);
       }
     }
     void restore();
     return () => {
       active = false;
+    };
+  }, [manager, renewSession]);
+
+  useEffect(() => {
+    if (!manager) return;
+    const loaded = (loadedUser: User) => setUser(loadedUser);
+    const unloaded = () => setUser(null);
+    manager.events.addUserLoaded(loaded);
+    manager.events.addUserUnloaded(unloaded);
+    return () => {
+      manager.events.removeUserLoaded(loaded);
+      manager.events.removeUserUnloaded(unloaded);
     };
   }, [manager]);
 
@@ -84,7 +134,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   return (
     <AuthContext.Provider
-      value={{ user, ready, configured: manager !== null, signIn, signOut }}
+      value={{
+        user,
+        ready,
+        configured: manager !== null,
+        getAccessToken,
+        signIn,
+        signOut,
+      }}
     >
       {children}
     </AuthContext.Provider>
