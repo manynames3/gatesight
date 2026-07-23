@@ -12,7 +12,7 @@ interface ImageCaptureLike {
 type ImageCaptureConstructor = new (track: PhotoCapabilitiesTrack) => ImageCaptureLike;
 
 function imageCaptureConstructor(): ImageCaptureConstructor | undefined {
-  return (window as typeof window & { ImageCapture?: ImageCaptureConstructor }).ImageCapture;
+  return window.ImageCapture;
 }
 
 async function canvasPhoto(video: HTMLVideoElement, canvas: HTMLCanvasElement): Promise<Blob> {

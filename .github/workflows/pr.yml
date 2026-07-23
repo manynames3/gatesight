@@ -62,7 +62,7 @@ jobs:
         with: { version: "0.8.13" }
       - run: uv run python ml/download_models.py --manifest ml/model-manifest.json --output build/models --verify
       - run: docker build --platform linux/amd64 -f services/recognition_worker/Dockerfile -t gatesight-recognition:${{ github.sha }} .
-      - uses: aquasecurity/trivy-action@0.32.0
+      - uses: aquasecurity/trivy-action@v0.32.0
         with:
           image-ref: gatesight-recognition:${{ github.sha }}
           severity: CRITICAL,HIGH

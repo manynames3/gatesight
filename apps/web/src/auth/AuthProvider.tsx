@@ -42,7 +42,7 @@ function makeManager(): UserManager | null {
 }
 
 export function AuthProvider({ children }: PropsWithChildren) {
-  const manager = useMemo(makeManager, []);
+  const manager = useMemo(() => makeManager(), []);
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
 

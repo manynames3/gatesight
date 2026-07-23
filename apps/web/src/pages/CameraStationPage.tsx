@@ -33,7 +33,6 @@ export function CameraStationPage() {
     () => new ApiClient(import.meta.env.VITE_API_ORIGIN, () => user?.access_token),
     [user],
   );
-  const videoRef = useRef<HTMLVideoElement>(null);
   const captureCanvasRef = useRef<HTMLCanvasElement>(null);
   const motionCanvasRef = useRef<HTMLCanvasElement>(null);
   const uploadAbortRef = useRef<AbortController | null>(null);
@@ -41,7 +40,18 @@ export function CameraStationPage() {
   const detectorRef = useRef(new MotionDetector());
   const motionSeenAtRef = useRef<number | null>(null);
   const lastCaptureAtRef = useRef(0);
-  const camera = useCamera(videoRef);
+  const {
+    videoRef,
+    streamRef,
+    permission: cameraPermission,
+    devices: cameras,
+    selectedDeviceId: cameraDeviceId,
+    resolution: cameraResolution,
+    lowResolution: cameraLowResolution,
+    error: cameraError,
+    start: startCamera,
+    select: selectCamera,
+  } = useCamera();
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [stations, setStations] = useState<Station[]>([]);
   const [facilityId, setFacilityId] = useState("");
@@ -51,6 +61,7 @@ export function CameraStationPage() {
   const [online, setOnline] = useState(navigator.onLine);
   const [heartbeat, setHeartbeat] = useState<"idle" | "sending" | "healthy" | "stale">("idle");
   const [clockOffsetMs, setClockOffsetMs] = useState(0);
+  const [clockNowMs, setClockNowMs] = useState(() => Date.now());
   const [motionState, setMotionState] = useState<"idle" | "watching" | "moving" | "stabilizing">(
     "idle",
   );
@@ -102,6 +113,11 @@ export function CameraStationPage() {
   }, []);
 
   useEffect(() => {
+    const interval = window.setInterval(() => setClockNowMs(Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
       if (pending) {
         event.preventDefault();
@@ -149,7 +165,7 @@ export function CameraStationPage() {
       setMessage("Acknowledge the camera and privacy notice before arming.");
       return;
     }
-    if (!facility || !station || camera.permission !== "granted") {
+    if (!facility || !station || cameraPermission !== "granted") {
       setMessage("Select a facility, station, and working camera before arming.");
       return;
     }
@@ -162,7 +178,7 @@ export function CameraStationPage() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Station could not be armed");
     }
-  }, [acquireWakeLock, camera.permission, facility, privacyAccepted, station, syncClock]);
+  }, [acquireWakeLock, cameraPermission, facility, privacyAccepted, station, syncClock]);
 
   useEffect(() => {
     const visible = () => {
@@ -181,7 +197,7 @@ export function CameraStationPage() {
         await api.heartbeat(stationId, {
           armed: true,
           client_time: new Date().toISOString(),
-          camera_device_hash: await cameraHash(camera.selectedDeviceId),
+          camera_device_hash: await cameraHash(cameraDeviceId),
         });
         if (active) setHeartbeat("healthy");
       } catch {
@@ -194,7 +210,7 @@ export function CameraStationPage() {
       active = false;
       window.clearInterval(interval);
     };
-  }, [api, armed, camera.selectedDeviceId, stationId]);
+  }, [api, armed, cameraDeviceId, stationId]);
 
   const processBurst = useCallback(
     async (burst: PendingBurst) => {
@@ -229,7 +245,6 @@ export function CameraStationPage() {
         randomKey("complete"),
       );
       setPending(null);
-      burst.frames.length = 0;
       const pollAbort = new AbortController();
       uploadAbortRef.current = pollAbort;
       await pollCapture(api, session.captureId, pollAbort.signal, setCaptureResult);
@@ -238,14 +253,21 @@ export function CameraStationPage() {
   );
 
   const captureNow = useCallback(async () => {
-    if (busy || !camera.streamRef.current || !videoRef.current || !captureCanvasRef.current) return;
+    if (
+      busy ||
+      !streamRef.current ||
+      !videoRef.current ||
+      !captureCanvasRef.current
+    ) {
+      return;
+    }
     setBusy(true);
     setMessage(null);
     setCaptureResult(null);
     try {
       const capturedAt = new Date();
       const frames = await captureBurst(
-        camera.streamRef.current,
+        streamRef.current,
         videoRef.current,
         captureCanvasRef.current,
         4,
@@ -263,7 +285,7 @@ export function CameraStationPage() {
       uploadAbortRef.current = null;
       setBusy(false);
     }
-  }, [busy, camera.streamRef, processBurst]);
+  }, [busy, processBurst, streamRef, videoRef]);
 
   useEffect(() => {
     if (!armed) return;
@@ -277,7 +299,11 @@ export function CameraStationPage() {
         !busy
       ) {
         lastSample = timestamp;
-        const sample = detectorRef.current.sample(videoRef.current, motionCanvasRef.current, region);
+        const sample = detectorRef.current.sample(
+          videoRef.current,
+          motionCanvasRef.current,
+          region,
+        );
         if (sample.moving) {
           motionSeenAtRef.current ??= Date.now();
           setMotionState("moving");
@@ -297,11 +323,10 @@ export function CameraStationPage() {
     };
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
-  }, [armed, busy, captureNow]);
+  }, [armed, busy, captureNow, videoRef]);
 
   const discard = () => {
     uploadAbortRef.current?.abort();
-    if (pending) pending.frames.length = 0;
     setPending(null);
     setProgress([]);
     setMessage("Pending in-memory frames were discarded.");
@@ -312,7 +337,7 @@ export function CameraStationPage() {
         dateStyle: "medium",
         timeStyle: "medium",
         timeZone: facility.timezone,
-      }).format(new Date(Date.now() + clockOffsetMs))
+      }).format(new Date(clockNowMs + clockOffsetMs))
     : "—";
 
   return (
@@ -354,8 +379,8 @@ export function CameraStationPage() {
           <canvas ref={captureCanvasRef} hidden />
           <canvas ref={motionCanvasRef} hidden />
           <div className="camera-actions">
-            {camera.permission !== "granted" ? (
-              <button type="button" className="primary-button" onClick={() => void camera.start()}>
+            {cameraPermission !== "granted" ? (
+              <button type="button" className="primary-button" onClick={() => void startCamera()}>
                 Enable camera
               </button>
             ) : (
@@ -394,17 +419,17 @@ export function CameraStationPage() {
             </label>
             <label>
               Physical camera
-              <select value={camera.selectedDeviceId} onChange={(event) => camera.select(event.target.value)} disabled={armed || camera.permission !== "granted"}>
-                {camera.devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>)}
+              <select value={cameraDeviceId} onChange={(event) => selectCamera(event.target.value)} disabled={armed || cameraPermission !== "granted"}>
+                {cameras.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>)}
               </select>
             </label>
             <dl className="detail-list">
-              <div><dt>Permission</dt><dd>{camera.permission}</dd></div>
+              <div><dt>Permission</dt><dd>{cameraPermission}</dd></div>
               <div>
                 <dt>Resolution</dt>
                 <dd>
-                  {camera.resolution
-                    ? `${camera.resolution.width} × ${camera.resolution.height}`
+                  {cameraResolution
+                    ? `${cameraResolution.width} × ${cameraResolution.height}`
                     : "—"}
                 </dd>
               </div>
@@ -412,8 +437,8 @@ export function CameraStationPage() {
               <div><dt>Facility time</dt><dd>{localTime}</dd></div>
               <div><dt>Clock offset</dt><dd>{clockOffsetMs} ms</dd></div>
             </dl>
-            {camera.error && <p className="field-error">{camera.error}</p>}
-            {camera.lowResolution && (
+            {cameraError && <p className="field-error">{cameraError}</p>}
+            {cameraLowResolution && (
               <p className="field-error" role="status">
                 Camera resolution is below 1280 × 720. Recognition quality may be
                 reduced; use a 1080p source when available.

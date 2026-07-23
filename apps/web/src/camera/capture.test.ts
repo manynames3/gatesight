@@ -6,7 +6,7 @@ const stream = { getVideoTracks: () => [track] } as unknown as MediaStream;
 
 afterEach(() => {
   vi.useRealTimers();
-  delete (window as typeof window & { ImageCapture?: unknown }).ImageCapture;
+  Reflect.deleteProperty(window, "ImageCapture");
 });
 
 describe("captureBurst", () => {

@@ -1,5 +1,4 @@
 import { act, renderHook } from "@testing-library/react";
-import type { RefObject } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useCamera } from "./useCamera";
 
@@ -70,8 +69,6 @@ function installMediaDevices(
   };
 }
 
-const videoRef = { current: null } as RefObject<HTMLVideoElement | null>;
-
 describe("useCamera", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -81,7 +78,7 @@ describe("useCamera", () => {
     installMediaDevices(
       vi.fn().mockRejectedValue(new DOMException("Permission denied", "NotAllowedError")),
     );
-    const { result } = renderHook(() => useCamera(videoRef));
+    const { result } = renderHook(() => useCamera());
     await act(() => result.current.start());
     expect(result.current.permission).toBe("denied");
     expect(result.current.error).toContain("Permission denied");
@@ -91,7 +88,7 @@ describe("useCamera", () => {
     installMediaDevices(
       vi.fn().mockRejectedValue(new DOMException("No camera", "NotFoundError")),
     );
-    const { result } = renderHook(() => useCamera(videoRef));
+    const { result } = renderHook(() => useCamera());
     await act(() => result.current.start());
     expect(result.current.permission).toBe("missing");
     expect(result.current.devices).toEqual([]);
@@ -103,7 +100,7 @@ describe("useCamera", () => {
       vi.fn().mockResolvedValue(stream(activeTrack)),
       [device("camera-a"), device("camera-b")],
     );
-    const { result } = renderHook(() => useCamera(videoRef));
+    const { result } = renderHook(() => useCamera());
     await act(() => result.current.start());
     expect(result.current.permission).toBe("granted");
     expect(result.current.selectedDeviceId).toBe("camera-a");
@@ -120,7 +117,7 @@ describe("useCamera", () => {
       vi.fn().mockResolvedValue(stream(activeTrack)),
       [device("camera-low")],
     );
-    const { result } = renderHook(() => useCamera(videoRef));
+    const { result } = renderHook(() => useCamera());
     await act(() => result.current.start());
     expect(result.current.resolution).toEqual({ width: 640, height: 480 });
     expect(result.current.lowResolution).toBe(true);
@@ -135,7 +132,7 @@ describe("useCamera", () => {
       vi.fn().mockResolvedValue(stream(activeTrack)),
       [device("camera-a")],
     );
-    const { result } = renderHook(() => useCamera(videoRef));
+    const { result } = renderHook(() => useCamera());
     await act(() => result.current.start());
     media.enumerateDevices.mockResolvedValue([]);
     await act(async () => {

@@ -18,23 +18,30 @@ function permissionFromError(error: unknown): CameraPermission {
   return "unreadable";
 }
 
-export function useCamera(video: React.RefObject<HTMLVideoElement | null>) {
+export function useCamera() {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const selectedDeviceIdRef = useRef("");
-  const [permission, setPermission] = useState<CameraPermission>("idle");
+  const hasMediaDevices =
+    typeof navigator !== "undefined" && Boolean(navigator.mediaDevices);
+  const [permission, setPermission] = useState<CameraPermission>(
+    hasMediaDevices ? "idle" : "missing",
+  );
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState("");
   const [resolution, setResolution] = useState<{ width: number; height: number } | null>(
     null,
   );
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    hasMediaDevices ? null : "This browser does not expose the required camera APIs.",
+  );
 
   const stop = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     setResolution(null);
-    if (video.current) video.current.srcObject = null;
-  }, [video]);
+    if (videoRef.current) videoRef.current.srcObject = null;
+  }, []);
 
   const refreshDevices = useCallback(async () => {
     const mediaDevices = await navigator.mediaDevices.enumerateDevices();
@@ -55,13 +62,13 @@ export function useCamera(video: React.RefObject<HTMLVideoElement | null>) {
           setError("The selected camera disconnected.");
         });
         streamRef.current = stream;
-        if (video.current) {
-          video.current.srcObject = stream;
-          await video.current.play();
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
         }
         const settings = track.getSettings();
-        const width = settings.width ?? video.current?.videoWidth ?? 0;
-        const height = settings.height ?? video.current?.videoHeight ?? 0;
+        const width = settings.width ?? videoRef.current?.videoWidth ?? 0;
+        const height = settings.height ?? videoRef.current?.videoHeight ?? 0;
         setResolution(width > 0 && height > 0 ? { width, height } : null);
         setPermission("granted");
         const selected = settings.deviceId ?? deviceId ?? "";
@@ -77,15 +84,11 @@ export function useCamera(video: React.RefObject<HTMLVideoElement | null>) {
         );
       }
     },
-    [refreshDevices, stop, video],
+    [refreshDevices, stop],
   );
 
   useEffect(() => {
-    if (!navigator.mediaDevices) {
-      setPermission("missing");
-      setError("This browser does not expose the required camera APIs.");
-      return;
-    }
+    if (!navigator.mediaDevices) return;
     const changed = async () => {
       const mediaDevices = await navigator.mediaDevices.enumerateDevices();
       const cameras = mediaDevices.filter((device) => device.kind === "videoinput");
@@ -108,6 +111,7 @@ export function useCamera(video: React.RefObject<HTMLVideoElement | null>) {
   }, [stop]);
 
   return {
+    videoRef,
     streamRef,
     permission,
     devices,
