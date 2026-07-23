@@ -21,6 +21,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: ${{ vars.AWS_DEPLOY_ROLE_ARN != '' && vars.ECR_REPOSITORY_URL != '' }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment || 'dev' }}
     env:
