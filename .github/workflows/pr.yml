@@ -43,7 +43,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
         with: { terraform_version: "1.14.9" }
-      - uses: terraform-linters/setup-tflint@v4
+      - uses: terraform-linters/setup-tflint@v6
         with: { tflint_version: "v0.58.1" }
       - run: terraform fmt -check -recursive infrastructure/terraform
       - run: terraform -chdir=infrastructure/terraform/environments/dev init -backend=false
