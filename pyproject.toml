@@ -30,7 +30,7 @@ recognition = [
   "numpy==2.2.6",
   "onnxruntime==1.22.1",
   "open-image-models==0.5.1",
-  "opencv-python-headless==4.12.0.88",
+  "opencv-python-headless==5.0.0.93",
 ]
 evaluation-challenger = [
   "paddleocr==3.7.0",

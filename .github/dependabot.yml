@@ -6,6 +6,9 @@ updates:
   - package-ecosystem: pip
     directory: /
     schedule: { interval: weekly }
+    ignore:
+      - dependency-name: numpy
+        versions: [">=2.4"]
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
