@@ -179,6 +179,7 @@ resource "aws_iam_role_policy" "service" {
 }
 
 resource "aws_lambda_function" "control_api" {
+  #checkov:skip=CKV_AWS_115:Production reserves concurrency; development leaves it unreserved because the portfolio account has a ten-concurrency regional quota.
   #checkov:skip=CKV_AWS_117:This serverless API uses only AWS-managed public endpoints; a VPC would add NAT cost and no private data path.
   #checkov:skip=CKV_AWS_116:API Gateway invokes synchronously, so errors return to the caller and are alarmed rather than sent to a Lambda DLQ.
   #checkov:skip=CKV_AWS_272:ZIP signing requires environment-owned Signer profiles; deployment provenance is OIDC-bound and the artifact is immutable.
@@ -214,6 +215,7 @@ resource "aws_lambda_function" "control_api" {
 }
 
 resource "aws_lambda_function" "recognition" {
+  #checkov:skip=CKV_AWS_115:Production reserves concurrency; development leaves it unreserved because the portfolio account has a ten-concurrency regional quota.
   #checkov:skip=CKV_AWS_117:The worker uses S3, SQS, DynamoDB, SSM, and KMS public service endpoints; avoiding a VPC removes NAT exposure and cost.
   #checkov:skip=CKV_AWS_116:The SQS event source owns retry and an encrypted DLQ; a Lambda asynchronous DLQ does not apply.
   #checkov:skip=CKV_AWS_272:Lambda code signing does not support container images; CI signs and verifies the immutable ECR digest with Cosign.
@@ -261,6 +263,7 @@ locals {
 }
 
 resource "aws_lambda_function" "consumer" {
+  #checkov:skip=CKV_AWS_115:Production reserves concurrency; development leaves it unreserved because the portfolio account has a ten-concurrency regional quota.
   #checkov:skip=CKV_AWS_117:Consumers access only regional AWS APIs; EventBridge and stream sources do not require a VPC.
   #checkov:skip=CKV_AWS_116:EventBridge targets use retry plus an encrypted target DLQ; the outbox stream retains retries at its source.
   #checkov:skip=CKV_AWS_272:ZIP signing requires environment-owned Signer profiles; deployment provenance is OIDC-bound and artifacts are immutable.
