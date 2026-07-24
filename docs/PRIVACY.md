@@ -2,9 +2,21 @@
 
 License plates and vehicle images are sensitive operational data.
 
+Collect them only for authorized facility operations, keep access narrow, and
+delete them on a documented schedule. GateSight performs no facial recognition
+or person identification.
+
 ## Collection notice
 
-Before arming, the operator sees that vehicle images and plates are captured for authorized facility operations, that no facial recognition/person identification occurs, and that media is not intentionally persisted locally. Facilities should post physical notice/signage, define a lawful purpose, document access roles, and honor applicable data-subject requirements.
+GateSight does not put a privacy-acknowledgment checkbox in the capture path.
+Automatic capture becomes active when camera permission, a facility, and a
+station are available. The facility is therefore responsible for approved
+physical notice/signage, a documented lawful purpose, access roles, and
+applicable data-subject requirements.
+
+The documented purpose is vehicle-gate operation. No facial recognition or
+person identification occurs, and media is not intentionally persisted on the
+browser device.
 
 ## Local-device behavior
 

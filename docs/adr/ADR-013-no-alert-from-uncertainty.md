@@ -6,7 +6,10 @@ A false “unregistered vehicle” alert wastes security attention and can cause
 
 ## Decision
 
-Only `RECOGNIZED`, high-confidence, `ENTRY` observations enter registration evaluation. Review/no-plate/multiple/failed/low-confidence outcomes cannot create an unregistered alert. Active registrations suppress; blocked matches alert.
+Only `RECOGNIZED`, high-confidence, `ENTRY` observations enter registration
+evaluation. Review, not-detected, multiple-plate, failed, and low-confidence
+outcomes cannot create an unregistered alert. Active registrations suppress;
+blocked matches alert.
 
 ## Alternatives considered
 

@@ -1,8 +1,16 @@
 # Event catalog
 
+Use this guide when adding a producer or consumer, changing an event, or
+replaying failed work. The contracts are intentionally small and never carry
+plate text or image bytes.
+
 ## Recognition job (SQS)
 
-`RecognitionJob.v1` is internal work, not a domain event. It contains schema version, capture/tenant/facility/station IDs, direction, correlation ID, bucket, three-to-five exact object keys, audit timestamps, and facility timezone. It never includes bytes, plate text, email, or tokens.
+`RecognitionJob.v1` is internal work, not a domain event. It contains schema
+version, capture/tenant/facility/station IDs, direction, correlation ID, bucket,
+exact object keys, audit timestamps, and facility timezone. Current browser
+capture sends four keys; the contract accepts three to five. It never includes
+bytes, plate text, email, or tokens.
 
 Producer: control API after explicit completion and `HeadObject` verification.
 Consumer: recognition worker, batch size 1.

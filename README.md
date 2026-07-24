@@ -1,407 +1,334 @@
 # GateSight
 
-GateSight is a capture-first, AWS-native license-plate recognition system for vehicle yards, auctions, parking operations, and facility gates. An authorized operator opens the Cloudflare-hosted React application on a modern computer, grants video-only camera permission, selects a logical entry or exit gate, and captures a short image burst. The browser uploads those frames directly to private S3; recognition happens later through SQS and a Python Lambda container.
+GateSight turns a camera at a vehicle gate into a capture, recognition, visit, and alert workflow.
 
-The operational objective is simple: keep the lane moving while preserving trustworthy evidence, tenant isolation, and a human path for uncertain results. A Lambda cold start can delay recognition, but it can never prevent the browser from taking the photographs.
+The browser takes the pictures first. AWS processes them asynchronously. A slow model or temporary queue backlog can delay the answer, but it cannot stop the operator from capturing the vehicle.
+
+[Open GateSight](https://gatesight.pages.dev) · [Browse the documentation](docs/README.md)
 
 > GateSight is an independent portfolio project. It is not affiliated with, sponsored by, or endorsed by Cox Automotive, Manheim, or any other vehicle marketplace or automotive company.
 
-## The gate problem
+## Start here
 
-At an unattended gate, synchronous OCR couples three failure domains to the driver’s immediate experience: camera capture, network/model availability, and recognition latency. A slow cold start or temporary queue backlog should not make an operator miss the vehicle. GateSight therefore captures a burst before it starts recognition work, returns upload instructions quickly, and exposes processing state through polling with exponential backoff.
+| If you want to… | Go here |
+| --- | --- |
+| Understand the product | [What GateSight does](#what-gatesight-does) |
+| See the system design | [Architecture](#architecture) |
+| Run it locally | [Local development](#local-development) |
+| Test the full workflow | [Testing](#testing) |
+| Operate or troubleshoot it | [Production runbook](docs/RUNBOOK.md) |
+| Review security and privacy | [Security](docs/SECURITY.md) and [privacy](docs/PRIVACY.md) |
+| Understand model limits and rights | [Model card](docs/MODEL_CARD.md) |
+| Deploy it | [Deployment](#deployment) |
 
-This design favors operational throughput and auditability:
+## What GateSight does
 
-- The camera produces three to five frames while the vehicle is still aligned.
-- Frames upload directly to private S3 without passing through API Gateway or a Node server.
-- SQS buffers CPU-compatible recognition work and absorbs bursts.
-- The result, candidates, confidences, quality evidence, and timestamps are persisted together.
-- Entry/exit projection and security evaluation run independently after recognition.
-- Uncertain text is review work. It is never evidence that a vehicle is unregistered.
+An authorized operator:
+
+1. Signs in.
+2. Chooses a facility and an `ENTRY` or `EXIT` gate.
+3. Selects a connected camera.
+4. Captures manually or lets automatic capture trigger.
+5. Watches the result move from upload to recognition.
+
+GateSight then:
+
+- saves the approved image burst to private, encrypted S3;
+- detects and reads the plate with a pretrained ALPR pipeline;
+- stores the evidence and decision in DynamoDB;
+- opens or closes a vehicle visit;
+- creates review work when evidence is uncertain;
+- evaluates high-confidence entries against registered vehicles; and
+- exposes queue, worker, outbox, and station health.
+
+The goal is not “OCR at any cost.” The goal is a trustworthy gate record that keeps the lane moving.
+
+## The 60-second workflow
+
+```text
+Camera
+  ↓
+4 in-memory frames
+  ↓
+Local plate-likeness check
+  ↓
+Private S3 upload
+  ↓
+SQS recognition queue
+  ↓
+FastALPR + multi-frame consensus
+  ↓
+Observation saved
+  ├─ Visit opened or closed
+  ├─ Human review requested
+  └─ Guarded security evaluation
+```
+
+### What happens in the browser
+
+- The app requests video only—never microphone access.
+- The operator can choose any camera exposed by the browser.
+- Manual and automatic capture use the same four-frame path.
+- Frames stay in memory until upload or discard.
+- At least two frames must show plate-like character structure before upload.
+- Blank scenes and simple non-character patterns are discarded without upload.
+- Closing the tab before upload can lose the frames because GateSight intentionally creates no offline copy.
+
+### What happens in AWS
+
+- The browser uploads JPEGs directly to private S3.
+- The control API verifies every expected object before queueing work.
+- SQS buffers recognition and handles retry/backpressure.
+- A Python Lambda container runs detection, crop processing, OCR, and consensus.
+- One DynamoDB transaction saves the observation, capture result, and outbox event.
+- EventBridge sends the completed result to independent visit and security consumers.
+
+## Why capture comes first
+
+A gate should not miss a vehicle because a model is cold or a queue is busy.
+
+GateSight separates two jobs:
+
+- **Capture now:** time-sensitive and controlled by the operator.
+- **Recognize next:** CPU-heavy, retryable, and asynchronous.
+
+That separation gives the system three useful properties:
+
+1. **Throughput:** the lane does not wait on inference.
+2. **Recovery:** failed recognition can retry without retaking the picture.
+3. **Evidence:** the original burst, candidates, quality signals, and decision stay connected.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    User["Authorized browser station"] -->|"OAuth 2.0 code + PKCE"| Cognito["Cognito Hosted UI"]
-    User -->|"create / complete / poll"| API["API Gateway HTTP API"]
-    API --> Control["FastAPI + Mangum Lambda"]
-    Control --> DDB["DynamoDB domain tables"]
-    Control -->|"restricted presigned POST"| User
-    User -->|"JPEG burst"| S3["Private KMS-encrypted S3"]
-    Control -->|"one capture job; S3 keys only"| SQS["SQS Standard"]
-    SQS --> Worker["Python 3.12 recognition Lambda container"]
+    Browser["Authorized browser station"] --> Cognito["Cognito Hosted UI"]
+    Browser --> API["API Gateway + FastAPI Lambda"]
+    API --> Browser
+    Browser --> S3["Private KMS-encrypted S3"]
+    API --> SQS["SQS recognition queue"]
+    SQS --> Worker["Recognition Lambda container"]
     Worker --> S3
-    Worker -->|"transaction: observation + capture + outbox"| DDB
-    DDB -->|"outbox stream"| Publisher["Outbox publisher Lambda"]
-    Publisher --> Bus["Custom EventBridge bus"]
-    Bus --> Visit["Visit projector Lambda"]
-    Bus --> Security["Security evaluator Lambda"]
-    Security --> SNS["Optional SNS email"]
-    Visit --> DDB
-    Security --> DDB
-    API --> CW["CloudWatch logs, metrics, X-Ray"]
-    Worker --> CW
-    Publisher --> CW
-    Visit --> CW
-    Security --> CW
+    Worker --> DDB["DynamoDB + transactional outbox"]
+    DDB --> Publisher["Outbox publisher"]
+    Publisher --> Bus["EventBridge"]
+    Bus --> Visit["Visit projector"]
+    Bus --> Security["Security evaluator"]
+    Security --> SNS["Optional SNS notification"]
 ```
 
-No VPC or NAT Gateway is required. Every compute component scales to zero.
+There is no always-running server, database instance, cluster, load balancer, VPC, or NAT Gateway. Compute scales to zero.
 
-## Event sequence
+For trust boundaries, consistency rules, state transitions, and topology, read [Architecture](docs/ARCHITECTURE.md).
 
-```mermaid
-sequenceDiagram
-    actor Operator
-    participant Web as React camera station
-    participant API as Control API
-    participant S3 as Private S3
-    participant Q as SQS Standard
-    participant CV as Recognition Lambda
-    participant DB as DynamoDB
-    participant OB as Outbox publisher
-    participant EB as EventBridge
-    participant VP as Visit projector
-    participant SE as Security evaluator
+## Recognition without overclaiming
 
-    Operator->>Web: Capture now / arm station
-    Web->>Web: Capture 4 JPEG Blobs in memory
-    Web->>API: POST /v1/captures
-    API-->>Web: Server keys + presigned POST fields
-    par Direct frame uploads
-        Web->>S3: frame-0.jpg
-        Web->>S3: frame-1.jpg
-        Web->>S3: frame-2.jpg
-        Web->>S3: frame-3.jpg
-    end
-    Web->>API: POST /v1/captures/{id}/complete
-    API->>S3: HeadObject every issued key
-    API->>DB: Conditional UPLOADING → QUEUED
-    API->>Q: RecognitionJob.v1 with IDs and S3 keys
-    API-->>Web: QUEUED
-    loop Exponential backoff
-        Web->>API: GET /v1/captures/{id}
-        API-->>Web: Current state
-    end
-    Q->>CV: Batch size 1
-    CV->>S3: Read frames into memory
-    CV->>CV: Quality, detection, crop normalization, OCR, consensus
-    CV->>DB: Transactional observation + capture + outbox
-    DB->>OB: DynamoDB Stream
-    OB->>EB: PlateRecognitionCompleted.v1
-    par Independent consumers
-        EB->>VP: Project entry/exit visit
-        EB->>SE: Apply registration and alert policy
-    end
-```
-
-## What is event-driven
-
-Recognition work and post-recognition domain reactions are event-driven. Capture-session creation, explicit completion, status reads, review, registrations, alert transitions, media deletion, and administration are request/response operations because the caller needs immediate validation or a clear result.
-
-SQS is the durable recognition work queue. It supplies buffering, retry, backpressure, visibility timeouts, queue-age metrics, and a DLQ. Standard ordering is sufficient because consumers use capture timestamps, conditional writes, deterministic identifiers, and idempotency markers.
-
-EventBridge begins only after recognition. At that point one versioned domain event has several independent consumers. EventBridge is not used as the work queue because it is not the right place for queue depth, worker backpressure, or DLQ redrive of CPU work.
-
-S3 notifications are intentionally absent. One logical capture contains several objects and needs an explicit browser completion boundary; an object-created notification cannot prove the burst is complete. Kinesis is unnecessary for discrete gate observations. Step Functions adds orchestration to a single recognition stage without improving the workflow. ECS/Fargate keeps capacity and an operational control plane for an asynchronous bursty CPU workload that Lambda can run while scaling to zero. RDS is not required for the documented access patterns or transactions; DynamoDB provides conditional updates, transactions, TTL, streams, and on-demand billing.
-
-## Core user workflows
-
-### Camera station
-
-The station requests `video` only, preferring 1920×1080 with ideal constraints so lower-resolution cameras still work. Camera labels are enumerated only after permission. The interface handles denied permission, no device, unreadable devices, ended tracks, camera changes, and offline state.
-
-Manual capture and armed automatic capture use the same real path. Automatic mode monitors a configurable plate region using a small canvas, waits for motion to enter and briefly stabilize, then captures four JPEG frames approximately 250 ms apart. A cooldown suppresses immediate repeats. Screen Wake Lock is requested after the operator arms the station and reacquired after the page becomes visible.
-
-Frames are `Blob` objects held only in memory. GateSight does not write them to local/session storage, IndexedDB, Cache Storage, OPFS, a service worker, or the filesystem; full images are never converted to base64. The capture canvas is cleared after encoding. Uploads retry with bounded exponential backoff while the page is open. The operator can abort and discard pending frames. A navigation warning appears while a burst is pending.
-
-Browser implementations may spill memory to disk internally, so this is a guarantee of **no intentional local persistence**, not a forensic zero-disk guarantee. The availability tradeoff is explicit: closing the page, losing power, or losing the browser before upload can lose an image because GateSight does not create an offline copy.
-
-### Processing and review
-
-The page polls capture status with increasing delay. Terminal outcomes are:
-
-- `RECOGNIZED`
-- `NEEDS_REVIEW`
-- `NO_PLATE`
-- `MULTIPLE_PLATES`
-- `FAILED`
-
-`NEEDS_REVIEW` and `MULTIPLE_PLATES` are called out visibly. Security and administrators can inspect protected candidate evidence, confirm, correct, or reject. A correction appends an audit record; it never silently rewrites model evidence or historical visits.
-
-### Visits
-
-Camera stations are explicitly `ENTRY` or `EXIT`. A recognized entry opens a visit when no compatible visit is open. A recognized exit closes the current compatible visit and stores dwell duration. An exit without entry creates an orphan-exit anomaly. A second entry while a visit is still open creates a repeated-entry anomaly. Duplicate observations inside the configured direction/facility/plate window retain their observation records but suppress duplicate visit activity.
-
-### Registrations and alerts
-
-Registrations can be tenant-wide or facility-specific and have active dates plus `ACTIVE`, `EXPIRED`, or `BLOCKED` status. A security alert is eligible only when all of these are true:
-
-1. The station direction is `ENTRY`.
-2. The observation state is `RECOGNIZED`.
-3. Consensus meets the configured high-confidence threshold.
-4. No active authorization matches, or a blocked registration matches.
-
-No-plate, failed, low-confidence, ambiguous, and review-required outcomes cannot be labeled unregistered. Exits do not create unregistered-entry alerts. Alert IDs are deterministic within a suppression window. Optional SNS email contains only a masked plate, facility, timestamp, confidence category, and authenticated dashboard link—never an image or full plate.
-
-## Recognition pipeline
-
-The production profile is pinned:
+The production profile uses:
 
 - `fast-alpr==0.4.0`
 - `fast-plate-ocr==1.1.0`
 - `open-image-models==0.5.1`
-- detector: `yolo-v9-s-608-license-plate-end2end`
-- OCR: `cct-s-v2-global-model`
-- OpenCV headless preprocessing
+- YOLO v9 plate detection
+- global CCT plate OCR
+- OpenCV preprocessing
 - ONNX Runtime CPU
 
-The Lambda image downloads checksum-pinned artifacts at **container build time**. Production sets `GATESIGHT_PRELOAD_MODELS=1`, so ONNX sessions initialize during module initialization, outside the handler. Invocation never downloads weights.
+GateSight does not accept a reading simply because one frame produced text.
 
-Each object is checked for MIME, byte length, JPEG boundaries, decoded shape, dimensions, and pixel count. Quality evidence includes Laplacian blur, exposure, glare, plate pixel width, and perspective handling. All plausible plates are retained; more than one plausible plate makes the result ambiguous. Crops are bounded, perspective-normalized where a stable quadrilateral is found, resized, and CLAHE-enhanced. Original, normalized, and enhanced crops are stored under the same private KMS and lifecycle controls for authorized evaluation.
+Automatic recognition requires compatible evidence across usable frames. Conflicting high-confidence readings go to review. Multiple plausible plates go to review. If the detector returns no candidate, GateSight says review is required—it does not claim that no plate was present.
 
-Raw OCR is preserved. Lookup normalization only uppercases and removes non-alphanumeric separators. It never changes `O` to `0`, inserts a character, or uses a regional pattern as replacement evidence.
+Current outcomes are:
 
-### Multi-frame consensus
+| Outcome | Meaning | Automatic security alert? |
+| --- | --- | --- |
+| `RECOGNIZED` | Evidence supports a normalized plate | Only for guarded, high-confidence entries |
+| `NEEDS_REVIEW` | Evidence is incomplete, weak, or absent | No |
+| `MULTIPLE_PLATES` | More than one plausible plate | No |
+| `FAILED` | Processing could not finish | No |
 
-The policy favors exact agreement across at least two usable frames. Candidate weight combines detector confidence, OCR confidence, character confidence evidence, blur, exposure, glare, perspective, and plate size. A small exact-agreement bonus is allowed. A conflicting high-confidence reading forces review even when another reading wins. Edit distance helps identify nearby disagreement but never silently corrects text.
+Legacy `NO_PLATE` records remain readable for contract compatibility and appear in the UI as `NOT DETECTED — REVIEW`.
 
-Thresholds live in SSM Parameter Store and are cached briefly by Lambda Powertools. Defaults are engineering starting points—not scientifically calibrated claims. A labeled evaluation must approve any automatic-acceptance threshold.
+Read the [Model card](docs/MODEL_CARD.md) for limitations, evaluation requirements, and release rights.
 
-FastALPR/FastPlateOCR were selected because the required profile supplies a small ONNX CPU detector/OCR integration, per-character evidence, and a global plate model without a permanently running inference service. EasyOCR is not the production engine because it is a general OCR stack with a larger production surface and does not match the selected plate-specific evidence path. PaddleOCR PP-OCRv6-small is an isolated evaluation challenger only. OpenALPR is not used. YOLOv12 is outside the selected profile, and Ultralytics YOLO26 is excluded unless an applicable Enterprise license is explicitly supplied. AGPL code and weights are excluded from the proprietary deployment path.
+## Visits and alerts
 
-See [MODEL_CARD.md](docs/MODEL_CARD.md) and `ml/model-manifest.json`. The package repositories are MIT, but the release pages do not state separate weight redistribution terms or full training-data provenance. Consequently the manifest currently marks production redistribution `REVIEW_REQUIRED`. The image can be built and evaluated, but a proprietary production release must run `--require-redistribution-approval` after written confirmation and legal review. The repository does not pretend that package licensing answers weight licensing.
+### Visits
 
-## Data and access patterns
+- A recognized `ENTRY` opens a visit.
+- A recognized `EXIT` closes the compatible open visit.
+- An exit without an entry creates an `ORPHAN_EXIT` anomaly.
+- A repeated entry creates an anomaly instead of rewriting history.
+- Duplicate observations stay auditable but do not create duplicate visits.
 
-GateSight uses separate on-demand DynamoDB tables for facilities, stations, captures, observations, registrations, visits, alerts, outbox, idempotency, and audit records. Every record carries `tenantId`. Queries use composite primary keys and sparse GSIs; routine APIs do not scan. The detailed key/index review is in [DATA_MODEL.md](docs/DATA_MODEL.md).
+### Alerts
 
-The worker commits three intentions atomically:
+An unregistered or blocked-vehicle alert is eligible only when:
 
-1. the immutable recognition observation,
-2. the capture terminal state and observation link,
-3. a `PENDING` outbox record.
+1. the station is an `ENTRY`;
+2. the observation is `RECOGNIZED`;
+3. consensus is high confidence; and
+4. registration policy confirms the alert condition.
 
-The outbox stream publisher may publish an event twice if EventBridge accepted it immediately before the publisher failed to mark the row. Both consumers therefore use deterministic markers/conditional writes. Delayed or out-of-order events are evaluated against `estimatedCapturedAtServer`; historical records are never silently rewritten.
+Review, failure, ambiguity, low confidence, and exits cannot create an unregistered-entry alert.
 
-The event envelope is CloudEvents-inspired and includes `specversion`, ID, type, source, subject, time, content type, correlation ID, tenant ID, and data. It contains observation/capture IDs and lookup-safe metadata, not images, full plates, emails, or tokens.
+## Security and privacy
 
-## Capture timestamps
+GateSight treats plates and vehicle images as sensitive operational data.
 
-All persisted backend times are UTC:
+- Cognito uses OAuth 2.0 Authorization Code with PKCE.
+- API Gateway validates JWTs.
+- The API enforces role, tenant, facility, and object access.
+- Images stay in private S3 with KMS encryption and Block Public Access.
+- S3 upload policies restrict key, MIME type, byte size, and expiry.
+- DynamoDB, SQS, SNS, and logs use encryption controls.
+- Full plates and images are excluded from logs, metrics, email, and event payloads.
+- No facial recognition or person identification is performed.
+- Media deletion creates an audit record.
 
-- `capturedAtClient`
-- `estimatedCapturedAtServer`
-- `receivedAtServer`
-- `uploadedAt`
-- `processingStartedAt`
-- `processingCompletedAt`
-- facility timezone
+The UI is not a security boundary. The backend rechecks authorization on every protected operation.
 
-Before arming, the station samples `/v1/time` three times and uses the lowest-round-trip estimate to calculate client clock offset. `estimatedCapturedAtServer` drives visit ordering. Original timestamps remain for audit. The interface displays current facility-local time.
-
-## Authentication and authorization
-
-Cognito Hosted UI uses OAuth 2.0 Authorization Code with PKCE. The public browser client has no client secret. OIDC state and tokens use `sessionStorage`, not `localStorage`, and are cleared on logout. Images never share authentication storage.
-
-API Gateway validates the JWT. The FastAPI service then enforces:
-
-- `ADMIN`
-- `SECURITY`
-- `OPERATOR`
-- `VIEWER`
-- verified `custom:tenant_id`
-- facility membership from `custom:facility_ids`
-- object tenant and facility on each access
-
-The UI is not a security boundary. Full plate evidence is removed from responses to roles without security access.
-
-To invite a reviewer, configure an AWS CLI session for the authorized account and run:
-
-```bash
-export GATESIGHT_USER_POOL_ID=us-east-1_example
-export GATESIGHT_REVIEWER_EMAIL=reviewer@example.com
-export GATESIGHT_TENANT_ID=ten_01EXAMPLE0000000000000000
-export GATESIGHT_REVIEWER_GROUP=VIEWER
-export GATESIGHT_FACILITY_IDS=fac_01EXAMPLE0000000000000000
-bash scripts/invite_reviewer.sh
-```
-
-There is no anonymous access, demo credential, or seeded production record.
-
-For the portfolio development environment, seed the Atlanta, Dallas, and San
-Diego facility selectors with entry and exit gates:
-
-```bash
-uv run python scripts/seed_portfolio_locations.py
-uv run python scripts/seed_portfolio_locations.py --apply
-```
-
-The first command previews the records. The second writes only missing records
-to the `gatesight-dev` tables for `tenant_portfolio`; reruns do not create
-duplicates or overwrite conflicting data. Override `AWS_REGION`,
-`GATESIGHT_TABLE_PREFIX`, or `GATESIGHT_TENANT_ID` when targeting another
-non-production environment.
-
-## Security, privacy, and retention
-
-- S3 Block Public Access, Bucket Owner Enforced ownership, TLS-only policy, versioning, KMS encryption, lifecycle expiration, and POST policies constrained by exact key/MIME/size.
-- No public media URL. The implemented API deletes media; short-lived authenticated GETs can be added only behind the same object-level authorization when the review UI requires rendering.
-- KMS encryption for S3, DynamoDB, SQS, SNS, and encrypted log groups.
-- Separate Lambda roles with resource-scoped operations.
-- X-Ray and structured Powertools logs without plate values.
-- Stable error codes and correlation IDs with exception redaction.
-- Default raw retention: one day in dev, 30 days in production.
-- DynamoDB TTL for idempotency and temporary capture records.
-- Audit record after media deletion without retaining deleted bytes.
-- No facial recognition or person identification.
-
-Operators should post appropriate physical notice at monitored entrances and obtain a documented legal basis for plate/image processing. See [PRIVACY.md](docs/PRIVACY.md) and [SECURITY.md](docs/SECURITY.md).
-
-## Failure and recovery
-
-- Partial upload: completion fails without queueing; the open page can retry the failed frame.
-- Expired presign: create a new capture session; issued keys are never accepted for another capture.
-- Duplicate completion: idempotency record returns the prior result; SQS duplicates remain safe.
-- Worker failure: SQS retries; after four receives, the message reaches the DLQ.
-- Worker retry after commit: deterministic observation/outbox IDs detect the existing transaction.
-- Outbox duplicate: consumers use event markers and conditional writes.
-- EventBridge duplicate/delay: consumers fetch protected observation details and remain idempotent.
-- Camera disconnect: ended/device-change state disarms unattended assumptions and displays a fault.
-- Stale heartbeat: dashboard signal and alarm identify a station that claims to be armed but is no longer reporting.
-- Unavailable browser/network: in-memory frames may be lost by design.
-
-The [RUNBOOK.md](docs/RUNBOOK.md) gives DLQ inspection, redrive, rollback, alarm, and teardown procedures. [FAILURE_MODES.md](docs/FAILURE_MODES.md) contains the complete failure matrix.
-
-## Observability
-
-Every request and event carries correlation, tenant, facility, capture, observation, and model identifiers where applicable. Plate text is excluded from logs and metrics. Lambda Powertools supplies structured logging, traces, cold-start metrics, batch processing, and parameter caching. DynamoDB conditional records provide idempotency at business boundaries.
-
-The CloudWatch dashboard covers capture creation, API volume/5xx, recognition queue depth and age, DLQ depth, worker invocations/errors/p95 duration, result categories, outbox iterator age, visit projections, alerts, and delivery failures. Terraform alarms include DLQ depth, queue age, Lambda errors/throttles, duration regression, API 5xx, outbox backlog, and stale camera stations. A scheduled Lambda scans only station operational fields every five minutes and emits a count; it never reads or emits plate/media data.
-
-## Testing and evaluation
-
-The local pyramid includes:
-
-- pytest, Hypothesis, Ruff, mypy, Bandit, and dependency audit
-- Vitest and React Testing Library
-- Playwright Chromium and WebKit configuration with isolated camera API fixtures
-- Terraform format/validate, TFLint, and Checkov
-- Docker build, Trivy, model checksum verification, SBOM, and gitleaks
-- a credential-gated suite for a real temporary AWS environment
-- a physical camera checklist for Chrome, Edge, Safari, and Firefox
-
-Mocks/moto are useful for unit boundaries but are not described as AWS integration proof. Real AWS tests require explicit credentials and a temporary dev environment.
-
-The evaluation manifest records expected plate, region, lighting, weather, angle, glare, plate size/distance, temporary/permanent status, obstruction, allowed use, and provenance. Reports calculate detector precision/recall/mAP when boxes exist, OCR exact match, character error rate, end-to-end exact match, accepted coverage, accuracy among accepted, false unregistered-alert rate, review rate, latency, cold start, and image size.
-
-Target acceptance criteria—not measured claims—are:
-
-- at least 98% exact match among automatically accepted observations,
-- false unregistered-alert rate below 0.1%,
-- no alert from low-confidence observations,
-- asynchronous p95 latency appropriate for the facility’s operating procedure.
-
-No accuracy percentage is claimed because the repository ships no rights-cleared labeled vehicle dataset.
+Read [Security](docs/SECURITY.md), [Privacy](docs/PRIVACY.md), and [Failure modes](docs/FAILURE_MODES.md) before production use.
 
 ## Local development
 
-Prerequisites: Python 3.12, `uv`, Node.js 22, Docker, Terraform 1.9+, and modern browser camera permission on `localhost`.
+### Prerequisites
+
+- Python 3.12
+- `uv`
+- Node.js 22
+- Terraform 1.9+
+- a modern browser with camera permission on `localhost`
+
+Docker is needed only when you build or run the recognition container locally. GitHub Actions can build and publish that container remotely.
+
+### Start the app
 
 ```bash
 cp apps/web/.env.example apps/web/.env
 make bootstrap
 make dev-api
-# another terminal
+```
+
+In another terminal:
+
+```bash
 make dev-web
 ```
 
-Local development still requires a valid identity. The API accepts explicit development claims only when `GATESIGHT_ENVIRONMENT=local`; production cannot use that path. No inference is mocked. To run the worker locally, download the manifest-pinned models and set `GATESIGHT_MODEL_DIRECTORY`, or build the production container.
+Open the local URL printed by Vite and sign in with a valid development identity.
 
-Common commands:
+### Seed portfolio facilities
 
-```text
-make bootstrap
-make dev
-make dev-web
-make dev-api
-make test
+Preview the Atlanta, Dallas, and San Diego records:
+
+```bash
+uv run python scripts/seed_portfolio_locations.py
+```
+
+Apply only missing records:
+
+```bash
+uv run python scripts/seed_portfolio_locations.py --apply
+```
+
+The script is idempotent. It does not overwrite conflicting records.
+
+## Testing
+
+Run the fast checks:
+
+```bash
 make test-unit
+make lint
+npm --prefix apps/web run test
+```
+
+Run broader suites when the required environment is available:
+
+```bash
+make test
 make test-integration
 make test-e2e
-make lint
 make security
 make build-worker
-make build-lambdas
-make evaluate-models
-make tf-plan ENV=dev
-make tf-apply ENV=dev
-make deploy-web
-make smoke
-make destroy ENV=dev
 ```
 
-## AWS deployment
+Mocks prove local boundaries; they are not presented as AWS integration evidence. Real AWS tests require explicit credentials and a temporary authorized environment. Camera behavior still needs the [physical camera checklist](docs/PHYSICAL_CAMERA_TEST_CHECKLIST.md).
 
-Production deployment is credential- and approval-dependent. The workflow uses GitHub OIDC; static AWS keys are not supported.
+Read [Testing](docs/TESTING.md) for the scenario map.
 
-1. Create the remote Terraform state bucket/lock table and copy `backend.hcl.example` to uncommitted `backend.hcl`.
-2. Bootstrap the ECR repository once with an authorized targeted Terraform apply if the repository does not yet exist.
-3. Build `services/recognition_worker/Dockerfile`; models download during build and checksums must match the manifest.
-4. Push a Git-SHA tag, resolve its ECR digest, and provide `worker_image_uri` by digest.
-5. Build Linux/arm64 ZIP functions with `make build-lambdas`.
-6. Plan the dev environment and review IAM, deletion protection, lifecycle, email subscription, and account-wide enhanced scanning.
-7. Apply dev, invite an operator, confirm SNS if configured, and run the real AWS suite.
-8. Configure Cloudflare Pages variables from Terraform outputs and deploy the Vite `dist`.
-9. Require the GitHub `prod` environment approval before production apply.
+## Deployment
 
-Exact variable examples are in each environment directory. Terraform defaults to `us-east-1` but accepts another region.
+### AWS
 
-The deployment workflow distinguishes non-commercial portfolio use from a commercial
-release. The dev environment enforces `--require-portfolio-scope`, keeps model weights
-inside a private ECR image, and does not publish them in this repository or to the
-browser. The prod environment enforces `--require-redistribution-approval` and fails
-until the exact weight terms are approved. After approval, CI publishes by immutable
-digest, signs that digest keylessly with Cosign through GitHub OIDC, and verifies the
-signature before Terraform can deploy it.
+The worker deployment workflow uses GitHub OIDC—never static AWS keys.
 
-## Cloudflare Pages
+At a high level:
 
-The build generates `_headers` from the configured API, S3, and Cognito origins. It sets a restrictive CSP, denies framing, disables microphone/geolocation/payment/USB, grants camera only to self, and disables caching of `index.html`. `_redirects` provides SPA routing. Production and preview origins must both be added to Cognito callback/logout URLs, API CORS, S3 CORS, and the build-time CSP.
+1. Configure remote Terraform state.
+2. Bootstrap ECR once.
+3. Build and verify the pinned models.
+4. Publish the worker by immutable image digest.
+5. Sign and verify the image with Cosign.
+6. Package the ZIP Lambdas.
+7. Review and apply Terraform.
+8. Run authenticated smoke and physical camera tests.
 
-Web Analytics is not enabled. If added later, events must never include capture IDs, plates, image URLs, user IDs, or authenticated route parameters.
+The recognition worker can be built entirely in GitHub Actions; local Docker Desktop is not required for that path.
 
-## Cost profile
+### Cloudflare Pages
 
-The architecture has no always-running compute, database instance, cluster, NAT Gateway, or load balancer. Main cost drivers are recognition Lambda memory-duration, S3 bytes/requests and KMS calls, DynamoDB requests/storage, CloudWatch logs, and optional enhanced scanning. The sample budget is $30/month dev and $100/month prod, but [COST.md](docs/COST.md) shows transparent example assumptions. Actual price validation belongs in the target region/account before approval.
+Build-time variables supply the API, S3, and Cognito origins. The build generates:
+
+- a restrictive Content Security Policy;
+- camera permission for the application only;
+- no microphone, geolocation, payment, or USB permission;
+- no-store caching for `index.html`; and
+- SPA routing through `_redirects`.
+
+Production and preview domains must also exist in Cognito callbacks, API/S3 CORS, and the generated CSP.
+
+## Model and commercial-use gate
+
+The current pretrained model packages advertise permissive code licenses, but separate weight-redistribution terms and complete training-data provenance were not found.
+
+For the current portfolio deployment:
+
+- weights stay inside a private ECR image;
+- the repository does not redistribute them; and
+- the deployment is non-commercial.
+
+Commercial use or redistribution remains blocked until the exact artifacts receive written rights and provenance approval. See the [Model card](docs/MODEL_CARD.md) and `ml/model-manifest.json`.
 
 ## Known limitations
 
-- A browser is less controllable than a managed edge appliance: OS updates, sleep policy, camera driver prompts, and tab lifecycle can interrupt an unattended station.
-- Wake Lock is best effort and begins only after a user gesture.
-- Camera enumeration labels are permission-dependent.
-- There is no forensic guarantee that a browser never pages memory to disk.
-- Internet loss before upload can lose the capture because offline persistence is intentionally absent.
-- Plate performance is not yet measured on a rights-cleared facility-specific dataset.
-- Regional plate patterns are supporting review evidence, not a correction engine.
-- Timestamp offset estimation is useful but is not a trusted hardware time source.
-- The current model weights are restricted to the documented non-commercial portfolio
-  deployment; commercial use or redistribution requires explicit rights and provenance
-  approval.
+- Browser stations can be interrupted by sleep, updates, permissions, extensions, or camera drivers.
+- Wake Lock is best effort.
+- Internet loss before upload can lose an in-memory capture.
+- Browser memory may be paged to disk by the operating system; GateSight makes no forensic zero-disk claim.
+- Accuracy is not yet measured on a rights-cleared, facility-representative dataset.
+- Confidence values are not automatically calibrated probabilities.
+- A permanently unattended facility may need a managed kiosk or signed edge agent.
 
-For a permanently unattended gate, the next architectural review should compare this station with a managed kiosk or signed local capture agent that can enforce camera health, OS policy, and supervised restarts.
+These are engineering constraints to measure and manage—not footnotes to hide.
 
-## Production-hardening priorities
+## Documentation
 
-1. Obtain explicit detector/OCR weight redistribution and training-data provenance confirmation; record legal approval in the manifest.
-2. Assemble a rights-cleared, facility-representative labeled dataset and calibrate thresholds against the false-alert objective.
-3. Deploy a temporary dev environment and complete real camera + AWS + DLQ + rollback exercises.
-4. Add authorized, short-lived media rendering to the review page with purpose-bound audit records.
-5. Extend the scheduled heartbeat evaluator with facility operating-hour calendars so overnight maintenance windows can be muted automatically.
-6. Run load/backpressure tests with the expected burst rate and reserve Lambda concurrency if measurements justify it.
-7. Add WAF/rate rules and organization-level CloudTrail/GuardDuty/Security Hub controls in the target landing zone.
-8. Decide whether an unattended production site needs a managed kiosk/edge agent based on physical trials.
+Use [Documentation](docs/README.md) to choose the shortest path for your role.
+
+Core references:
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Data model](docs/DATA_MODEL.md)
+- [Event catalog](docs/EVENT_CATALOG.md)
+- [Production runbook](docs/RUNBOOK.md)
+- [Testing strategy](docs/TESTING.md)
+- [Physical camera checklist](docs/PHYSICAL_CAMERA_TEST_CHECKLIST.md)
+- [Security](docs/SECURITY.md)
+- [Privacy](docs/PRIVACY.md)
+- [Model card](docs/MODEL_CARD.md)
+- [Cost assumptions](docs/COST.md)
+- [Failure-mode matrix](docs/FAILURE_MODES.md)
 
 ## Repository map
 
@@ -410,14 +337,12 @@ apps/web/                         React/Vite station and operations UI
 services/control_api/             FastAPI/Mangum control plane
 services/recognition_worker/      FastALPR Lambda container
 services/outbox_publisher/        DynamoDB Streams → EventBridge
-services/visit_projector/         Idempotent entry/exit projection
+services/visit_projector/         Entry/exit visit projection
 services/security_evaluator/      Registration and alert policy
-packages/python_domain/           Pure domain models and policies
-packages/contracts/               JSON Schema and exported OpenAPI
-ml/evaluation/                    Reproducible primary/challenger metrics
+packages/python_domain/           Domain models and policies
+packages/contracts/               JSON Schema and OpenAPI
+ml/evaluation/                    Reproducible model evaluation
 infrastructure/terraform/         Dev/prod AWS resources
-docs/                             ADRs, runbooks, threat/privacy/model docs
+docs/                             Architecture, operations, and assurance guides
 tests/                            Unit, integration, and browser suites
 ```
-
-Start with [ARCHITECTURE.md](docs/ARCHITECTURE.md), [DATA_MODEL.md](docs/DATA_MODEL.md), [EVENT_CATALOG.md](docs/EVENT_CATALOG.md), and the ADRs for the reasoning behind the system.

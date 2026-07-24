@@ -1,8 +1,27 @@
 # Production runbook
 
+Use this guide when GateSight is slow, unavailable, backed up, or producing an unexpected operational result.
+
+## Three rules before you touch anything
+
+1. Capture IDs and correlation IDs are safe incident references. Plate text and images are not.
+2. Fix the cause before redriving or replaying work.
+3. Prefer conditional, idempotent recovery over manual record rewriting.
+
+## Where should I start?
+
+| Symptom | Start here |
+| --- | --- |
+| Recognition is delayed | Queue depth/age, then worker errors |
+| Capture failed after upload | Recognition DLQ |
+| Observation exists but visits/alerts do not | Outbox and consumer errors |
+| Automatic capture stopped | Stale station |
+| A deployment caused the problem | Rollback |
+| A user requested image removal | Media deletion |
+
 ## First triage
 
-1. Note environment, UTC time, alarm, correlation/capture/observation ID—never copy a plate.
+1. Note the environment, UTC time, alarm, and correlation/capture/observation ID. Never copy a plate.
 2. Check the CloudWatch dashboard flow left to right: API, queue depth/age, worker errors/duration, outbox iterator age, consumer errors, SNS.
 3. Confirm whether capture continues. Queue backlog should delay results without blocking new browser photographs/uploads.
 4. Use X-Ray/logs with correlation ID; do not enable request/event logging containing sensitive payloads.
@@ -21,15 +40,30 @@ For bulk redrive, use the SQS redrive API with an approved change and bounded ve
 
 ## Outbox backlog
 
-Inspect publisher errors, stream iterator age, EventBridge failed entries, IAM, and event schema. Pending rows remain durable. A publish-before-update retry can duplicate; consumers are designed for it.
+Check publisher errors, stream iterator age, EventBridge failed entries, IAM, and event schema—in that order.
+
+Pending rows remain durable. A publish-before-update retry can duplicate an event; consumers are designed to handle that safely.
 
 ## Stale station
 
-Contact the facility, inspect network/power/browser visibility/camera track and wake-lock status, disarm if unattended capture is unreliable, then re-enable and perform a physical test burst. Tune alarm schedules to operating hours.
+1. Contact the facility.
+2. Check power, network, browser visibility, camera track, and Wake Lock.
+3. Close the camera page or revoke camera permission if automatic capture is
+   unreliable.
+4. Restore the station and complete a physical test burst.
+5. Align alarm schedules with facility operating hours.
 
 ## Rollback
 
-Use `.github/workflows/rollback.yml` with a previously approved ECR URI by digest. Wait for Lambda update and run an authenticated smoke. Cloudflare Pages retains deployments; use the Cloudflare dashboard/API to promote the prior reviewed deployment, then repeat smoke/camera checks. Never roll back DynamoDB schema/state blindly; use forward-compatible migrations and PITR only under incident command.
+### AWS worker
+
+Use `.github/workflows/rollback.yml` with a previously approved ECR URI by digest. Wait for the Lambda update, then run an authenticated smoke test.
+
+### Web application
+
+Cloudflare Pages retains deployments. Promote the previous reviewed deployment, then repeat smoke and camera checks.
+
+Never roll back DynamoDB schema or state blindly. Use forward-compatible migrations and PITR only under incident command.
 
 ## Media deletion
 

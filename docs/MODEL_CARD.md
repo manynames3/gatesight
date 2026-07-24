@@ -1,5 +1,7 @@
 # Model card
 
+This document defines what the recognition system may do, what it must never claim, and what must be proven before a commercial release.
+
 ## Intended use
 
 Detect and transcribe visible vehicle license plates at controlled facility gates, then route evidence into operational review, visit pairing, and guarded entry alerts.
@@ -19,7 +21,11 @@ Hashes, URLs, byte sizes, and license review state are in `ml/model-manifest.jso
 
 ## Decision policy
 
-Automation requires exact agreement across at least two usable frames, strong combined evidence, and no conflicting high-confidence reading. Multiple plausible plates, small/blurred/glared crops, one-frame detections, low confidence, or conflict produce review/no-plate states. Normalization never substitutes characters. Regional patterns can inform review only.
+Automation requires compatible evidence across usable frames, strong combined evidence, and no conflicting high-confidence reading. Four unanimous high-confidence frames may be accepted even when the conservative composite score remains below the alert threshold.
+
+Multiple plausible plates, small/blurred/glared crops, one-frame detections, low confidence, conflict, or no detector candidates require review. “No candidates” is not evidence that no plate was present.
+
+Normalization never substitutes characters. Regional patterns can inform review only.
 
 ## Risks and limitations
 
@@ -35,7 +41,7 @@ PaddleOCR PP-OCRv6-small is a separately installed challenger. Replacement requi
 
 ## Monitoring
 
-Monitor recognition state rates, review rate, no-plate rate, processing duration, cold starts, failures, and false-alert outcomes from reviewed samples. Never use plate values as metric dimensions.
+Monitor recognition state rates, review/not-detected rate, processing duration, cold starts, failures, and false-alert outcomes from reviewed samples. Never use plate values as metric dimensions.
 
 ## Release gate
 
