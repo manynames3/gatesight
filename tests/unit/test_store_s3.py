@@ -1,7 +1,38 @@
+from decimal import Decimal
 from unittest.mock import Mock, patch
 
 from botocore.exceptions import ClientError
 from gatesight_control_api.store import AwsStore
+
+
+def test_dynamodb_writes_convert_nested_floats_to_decimals() -> None:
+    store = object.__new__(AwsStore)
+    table = Mock()
+    store.table = Mock(return_value=table)
+
+    store.put(
+        "captures",
+        {
+            "tenantId": "tenant_portfolio",
+            "recordId": "cap_1234567890",
+            "guideRegion": {"x": 0.25, "scores": [0.5, 1]},
+        },
+    )
+    item = table.put_item.call_args.kwargs["Item"]
+    assert item["guideRegion"] == {
+        "x": Decimal("0.25"),
+        "scores": [Decimal("0.5"), 1],
+    }
+
+    store.update(
+        "captures",
+        "tenant_portfolio",
+        "cap_1234567890",
+        "SET quality=:quality",
+        {":quality": {"score": 0.875}},
+    )
+    values = table.update_item.call_args.kwargs["ExpressionAttributeValues"]
+    assert values == {":quality": {"score": Decimal("0.875")}}
 
 
 def test_s3_client_uses_regional_virtual_hosted_urls() -> None:
