@@ -13,6 +13,7 @@ The browser takes the pictures first. AWS processes them asynchronously. A slow 
 | If you want to… | Go here |
 | --- | --- |
 | Understand the product | [What GateSight does](#what-gatesight-does) |
+| See it working | [Product tour](#product-tour) |
 | See the system design | [Architecture](#architecture) |
 | Run it locally | [Local development](#local-development) |
 | Test the full workflow | [Testing](#testing) |
@@ -82,6 +83,34 @@ Observation saved
 - A Python Lambda container runs detection, crop processing, OCR, and consensus.
 - One DynamoDB transaction saves the observation, capture result, and outbox event.
 - EventBridge sends the completed result to independent visit and security consumers.
+
+## Product tour
+
+These screenshots use authorized portfolio test data.
+
+### Capture without blocking the lane
+
+![GateSight camera station with a plate aligned inside the capture guide](docs/images/camera-station.webp)
+
+The station keeps facility, gate, camera, and connection status in one view. The
+green confirmation means AWS verified the uploaded four-frame burst; recognition
+continues asynchronously while the station remains ready.
+
+### Review every recognition outcome
+
+![GateSight observations list showing recognized and review outcomes](docs/images/observations.webp)
+
+Observations are filterable by facility and retain capture time, direction,
+state, and a protected record ID. A weak result becomes `NOT DETECTED — REVIEW`
+instead of a false claim that no plate was present.
+
+### See operational health at a glance
+
+![GateSight system health dashboard showing pipeline and station status](docs/images/system-health.webp)
+
+The health view separates API, worker, queue, outbox, dead-letter queue, and
+camera heartbeat signals. Here the AWS pipeline is healthy, while the page calls
+attention to five configured stations that have not reported.
 
 ## Why capture comes first
 
