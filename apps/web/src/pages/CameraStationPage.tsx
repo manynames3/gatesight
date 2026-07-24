@@ -11,7 +11,6 @@ import { captureBurst } from "../camera/capture";
 import { MotionDetector } from "../camera/motion";
 import {
   assessCapturedPlate,
-  assessLivePlate,
   burstResemblesPlate,
 } from "../camera/plateGate";
 import { guideRegion } from "../camera/region";
@@ -322,18 +321,6 @@ export function CameraStationPage() {
         setMessage("The camera is still preparing the plate guide. Try again in a moment.");
         return;
       }
-      const liveAssessment = assessLivePlate(
-        videoRef.current,
-        captureCanvasRef.current,
-        region,
-      );
-      if (!liveAssessment.likelyPlate) {
-        lastCaptureAtRef.current = Date.now();
-        setMessage(
-          "The plate check could not confirm letters or numbers inside the guide. Nothing was uploaded; re-align the plate and try again.",
-        );
-        return;
-      }
       await api.getServerTime();
       const capturedAt = new Date();
       const frames = await captureBurst(
@@ -351,7 +338,7 @@ export function CameraStationPage() {
         frames.length = 0;
         lastCaptureAtRef.current = Date.now();
         setMessage(
-          "The plate check was inconsistent across the burst. Nothing was uploaded; hold the plate steady and try again.",
+          "The four-frame check could not confirm plate-like character structure inside the guide. Nothing was uploaded; hold the plate steady and try again.",
         );
         return;
       }

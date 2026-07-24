@@ -49,6 +49,21 @@ function syntheticPlate() {
   return target;
 }
 
+function denseClosePlate() {
+  const target = image();
+  rectangle(target, 3, 3, 186, 4, 35);
+  rectangle(target, 3, 73, 186, 4, 35);
+  for (let character = 0; character < 9; character += 1) {
+    const x = 7 + character * 20;
+    rectangle(target, x, 10, 4, 58, 25);
+    rectangle(target, x + 12, 10, 4, 58, 25);
+    for (const y of [10, 22, 34, 46, 58, 64]) {
+      rectangle(target, x, y, 16, 4, 25);
+    }
+  }
+  return target;
+}
+
 function assessment(likelyPlate: boolean): PlateAssessment {
   return {
     likelyPlate,
@@ -73,6 +88,19 @@ describe("plate likeness gate", () => {
   it("rejects a blank region", () => {
     const target = image();
     expect(analyzePlatePixels(target.pixels, target.width, target.height).likelyPlate).toBe(false);
+  });
+
+  it("accepts dense character structure when a plate fills the guide", () => {
+    const target = denseClosePlate();
+    const result = analyzePlatePixels(target.pixels, target.width, target.height);
+    expect(
+      Math.max(
+        result.edgeDensity / 0.34,
+        result.verticalEdgeDensity / 0.26,
+        result.horizontalEdgeDensity / 0.28,
+      ),
+    ).toBeGreaterThan(1);
+    expect(result.likelyPlate, JSON.stringify(result)).toBe(true);
   });
 
   it("rejects vertical stripes without letter-like horizontal structure", () => {
