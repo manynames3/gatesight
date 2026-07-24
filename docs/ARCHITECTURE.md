@@ -37,10 +37,11 @@ Capture transitions are conditional:
 CREATED → UPLOADING → QUEUED → PROCESSING
                                   ├→ RECOGNIZED
                                   ├→ NEEDS_REVIEW
-                                  ├→ NO_PLATE
                                   ├→ MULTIPLE_PLATES
                                   └→ FAILED
 ```
+
+The worker uses `NEEDS_REVIEW` when the detector returns no candidates rather than asserting that no plate was present. `NO_PLATE` remains in the versioned contract only for backward compatibility with existing records.
 
 The worker uses a deterministic observation/outbox ID derived from the capture ID. A duplicate delivery either claims `QUEUED → PROCESSING`, sees the committed observation, or fails for retry; it cannot create another observation.
 

@@ -778,6 +778,7 @@ def system_health(
     checked_at = now()
     unavailable = False
 
+    recognition_queue: dict[str, Any]
     try:
         recognition_queue = store.queue_summary(settings.recognition_queue_url)
     except ClientError:
@@ -785,6 +786,7 @@ def system_health(
         recognition_queue = {"configured": True, "status": "unknown"}
         unavailable = True
 
+    dead_letter_queue: dict[str, Any]
     try:
         dead_letter_queue = store.queue_summary(settings.dlq_url)
     except ClientError:
@@ -792,6 +794,7 @@ def system_health(
         dead_letter_queue = {"configured": True, "status": "unknown"}
         unavailable = True
 
+    worker: dict[str, Any]
     try:
         worker = store.worker_summary()
     except ClientError:
@@ -799,6 +802,7 @@ def system_health(
         worker = {"state": "Unknown", "lastUpdateStatus": "Unknown"}
         unavailable = True
 
+    outbox: dict[str, Any]
     try:
         outbox = store.outbox_summary(user.tenant_id)
     except ClientError:
@@ -806,6 +810,7 @@ def system_health(
         outbox = {"status": "unknown"}
         unavailable = True
 
+    stations: dict[str, Any]
     try:
         stations = store.station_heartbeat_summary(
             user.tenant_id,

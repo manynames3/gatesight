@@ -5,6 +5,7 @@ import type { Facility } from "../api/generated";
 
 function displayValue(value: unknown): string {
   if (value === null || value === undefined) return "—";
+  if (value === "NO_PLATE") return "NOT DETECTED — REVIEW";
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return value.toString();
   return JSON.stringify(value);
