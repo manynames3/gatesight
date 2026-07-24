@@ -24,6 +24,19 @@ def _json_default(value: Any) -> Any:
     raise TypeError(f"unsupported serialization value: {type(value)!r}")
 
 
+def _dynamodb_safe(value: Any) -> Any:
+    """Convert JSON-compatible floats to DynamoDB's exact decimal representation."""
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, dict):
+        return {key: _dynamodb_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_dynamodb_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_dynamodb_safe(item) for item in value)
+    return value
+
+
 def encode_cursor(key: dict[str, Any] | None) -> str | None:
     if not key:
         return None
@@ -66,7 +79,7 @@ class AwsStore:
         return self.dynamodb.Table(f"{settings.table_prefix}-{name}")
 
     def put(self, table: str, item: dict[str, Any], condition: str | None = None) -> None:
-        arguments: dict[str, Any] = {"Item": item}
+        arguments: dict[str, Any] = {"Item": _dynamodb_safe(item)}
         if condition:
             arguments["ConditionExpression"] = condition
         self.table(table).put_item(**arguments)
@@ -93,7 +106,7 @@ class AwsStore:
         arguments: dict[str, Any] = {
             "Key": {"tenantId": tenant_id, "recordId": record_id},
             "UpdateExpression": expression,
-            "ExpressionAttributeValues": values,
+            "ExpressionAttributeValues": _dynamodb_safe(values),
             "ReturnValues": return_values,
         }
         if names:
