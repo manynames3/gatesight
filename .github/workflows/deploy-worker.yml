@@ -144,7 +144,7 @@ jobs:
             --output text
       - name: Deploy secure-setting event consumers
         run: |
-          for service in visit-projector security-evaluator; do
+          for service in outbox-publisher visit-projector security-evaluator; do
             aws lambda update-function-code \
               --function-name "gatesight-${{ inputs.environment }}-$service" \
               --zip-file "fileb://build/lambda/$service.zip"

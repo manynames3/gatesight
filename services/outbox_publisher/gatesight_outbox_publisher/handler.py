@@ -19,7 +19,6 @@ from aws_lambda_powertools.utilities.data_classes.dynamo_db_stream_event import 
     DynamoDBRecord,
     DynamoDBRecordEventName,
 )
-from boto3.dynamodb.types import TypeDeserializer
 from botocore.exceptions import ClientError
 
 logger = Logger(service="outbox-publisher")
@@ -33,11 +32,10 @@ EVENT_BUS_NAME = os.getenv("GATESIGHT_EVENT_BUS_NAME", "gatesight-local")
 session = boto3.session.Session(region_name=REGION)
 eventbridge = session.client("events")
 dynamodb = session.resource("dynamodb")
-deserializer = TypeDeserializer()
 
 
-def _deserialize(image: dict[str, Any]) -> dict[str, Any]:
-    return {key: deserializer.deserialize(value) for key, value in image.items()}
+def _stream_item(image: dict[str, Any]) -> dict[str, Any]:
+    return dict(image)
 
 
 @tracer.capture_method
@@ -53,7 +51,7 @@ def record_handler(record: DynamoDBRecord) -> None:
     image = stream_record.new_image
     if not image:
         return
-    item = _deserialize(dict(image))
+    item = _stream_item(dict(image))
     if item.get("status") != "PENDING":
         return
     event = item["event"]
