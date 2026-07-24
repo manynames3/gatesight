@@ -18,7 +18,7 @@
 | Invalid type / oversized / decompression bomb | `test_quality.py`, S3 POST policy |
 | Duplicate completion / SQS / outbox / EventBridge | idempotency/conditional component and AWS retry tests |
 | Worker retry after Dynamo write | deterministic ID + real transaction fault injection |
-| One-frame plate / conflict / low confidence / multiple / no plate | `test_consensus.py` |
+| One-frame plate / conflict / low confidence / multiple / no candidates | `test_consensus.py` |
 | Registered/unregistered/blocked entry; unregistered exit | `test_security.py` |
 | Duplicate/repeated entry; orphan/delayed exit | `test_visits.py`, projector integration |
 | Unauthorized tenant/role | claim/API component tests + AWS E2E |

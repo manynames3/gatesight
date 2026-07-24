@@ -20,7 +20,7 @@
 | EventBridge delayed/out of order | captured time vs state | Conditional projection/anomaly | Human review if incompatible |
 | Conflicting OCR | consensus policy | `NEEDS_REVIEW` | Human review |
 | Multiple plates | detector count | `MULTIPLE_PLATES` | Human review |
-| No plate | no candidates | `NO_PLATE` | No security classification |
+| Detector returns no candidates | no candidates | `NEEDS_REVIEW`; never assert that no plate was present | Human review; no security classification |
 | Registration table unavailable | consumer error | No alert decision committed | Retry; fail closed |
 | SNS delivery fails | Lambda metric/error | Alert remains in dashboard | SNS/endpoint recovery |
 | Stale heartbeat | station timestamp/alarm | Operational fault | Inspect browser/device |

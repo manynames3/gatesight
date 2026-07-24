@@ -20,7 +20,12 @@ import { uploadFrame } from "../camera/upload";
 import { StatusChip } from "../components/StatusChip";
 import { useCamera } from "../hooks/useCamera";
 
-const terminalNeedsReview = new Set(["NEEDS_REVIEW", "MULTIPLE_PLATES"]);
+const terminalNeedsReview = new Set(["NEEDS_REVIEW", "NO_PLATE", "MULTIPLE_PLATES"]);
+
+function captureStatusLabel(status: CaptureResult["status"]): string {
+  if (status === "NO_PLATE") return "NOT DETECTED — REVIEW";
+  return status.replaceAll("_", " ");
+}
 
 function captureKey(prefix: string, burstId: string) {
   return `${prefix}:${burstId}`;
@@ -325,7 +330,7 @@ export function CameraStationPage() {
       if (!liveAssessment.likelyPlate) {
         lastCaptureAtRef.current = Date.now();
         setMessage(
-          "No plate-like letters or numbers were detected inside the guide. Nothing was captured or uploaded.",
+          "The plate check could not confirm letters or numbers inside the guide. Nothing was uploaded; re-align the plate and try again.",
         );
         return;
       }
@@ -346,7 +351,7 @@ export function CameraStationPage() {
         frames.length = 0;
         lastCaptureAtRef.current = Date.now();
         setMessage(
-          "The burst did not consistently resemble a plate with letters or numbers. Nothing was retained or uploaded.",
+          "The plate check was inconsistent across the burst. Nothing was uploaded; hold the plate steady and try again.",
         );
         return;
       }
@@ -651,7 +656,7 @@ export function CameraStationPage() {
             <section className="control-card result-card" aria-live="polite">
               <h2>Latest capture</h2>
               <StatusChip tone={captureResult.status === "RECOGNIZED" ? "good" : captureResult.status === "FAILED" ? "danger" : "warn"}>
-                {captureResult.status.replaceAll("_", " ")}
+                {captureStatusLabel(captureResult.status)}
               </StatusChip>
               <p>Capture {captureResult.recordId}</p>
             </section>

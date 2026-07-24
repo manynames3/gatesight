@@ -16,6 +16,9 @@ class ConsensusThresholds:
     minimum_good_frames: int = 2
     maximum_edit_distance: int = 1
     minimum_plate_pixels: int = 72
+    unanimous_frames: int = 4
+    unanimous_ocr_confidence: float = 0.95
+    unanimous_detector_confidence: float = 0.55
 
 
 def levenshtein(left: str, right: str) -> int:
@@ -76,9 +79,9 @@ def decide_consensus(
     ]
     if not items:
         return ConsensusResult(
-            state=ObservationState.NO_PLATE,
+            state=ObservationState.NEEDS_REVIEW,
             consensus_score=0,
-            reason="no plate was detected",
+            reason="the detector returned no candidates; manual review is required",
             candidates=[],
         )
     if not usable:
@@ -109,16 +112,31 @@ def decide_consensus(
         and max(_candidate_weight(candidate) for candidate in group) >= thresholds.review_confidence
         for text, group in ranked[1:]
     )
+    winner_frame_ids = {candidate.frame_index for candidate in winner}
+    unanimous_high_confidence = (
+        len(winner) >= thresholds.unanimous_frames
+        and len(winner) == len(items)
+        and len(winner_frame_ids) == len(winner)
+        and all(
+            candidate.ocr_confidence >= thresholds.unanimous_ocr_confidence
+            and candidate.detector_confidence >= thresholds.unanimous_detector_confidence
+            for candidate in winner
+        )
+    )
     if (
         len(winner) >= thresholds.minimum_good_frames
-        and score >= thresholds.high_confidence
+        and (score >= thresholds.high_confidence or unanimous_high_confidence)
         and not high_conflict
     ):
         return ConsensusResult(
             state=ObservationState.RECOGNIZED,
             normalized_text=winner_text,
             consensus_score=score,
-            reason="exact agreement across good frames",
+            reason=(
+                "unanimous high-confidence agreement across all frames"
+                if unanimous_high_confidence and score < thresholds.high_confidence
+                else "exact agreement across good frames"
+            ),
             candidates=items,
         )
     reason = "conflicting high-confidence readings" if high_conflict else "insufficient consensus"

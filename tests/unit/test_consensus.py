@@ -60,13 +60,56 @@ def test_low_confidence_ocr_needs_review() -> None:
     assert result.state is ObservationState.NEEDS_REVIEW
 
 
+def test_four_unanimous_strong_readings_override_a_conservative_composite_score() -> None:
+    result = decide_consensus(
+        [
+            candidate("ABC123", 0, detector=0.8061, ocr=0.9998, pixels=657),
+            candidate("ABC123", 1, detector=0.5692, ocr=0.9998, pixels=643),
+            candidate("ABC123", 2, detector=0.8439, ocr=0.9999, pixels=655),
+            candidate("ABC123", 3, detector=0.8123, ocr=0.9999, pixels=666),
+        ]
+    )
+
+    assert result.consensus_score < ConsensusThresholds().high_confidence
+    assert result.state is ObservationState.RECOGNIZED
+    assert result.reason == "unanimous high-confidence agreement across all frames"
+
+
+def test_unanimous_override_rejects_weak_detector_evidence() -> None:
+    result = decide_consensus(
+        [
+            candidate("ABC123", 0, detector=0.80, ocr=0.99),
+            candidate("ABC123", 1, detector=0.54, ocr=0.99),
+            candidate("ABC123", 2, detector=0.81, ocr=0.99),
+            candidate("ABC123", 3, detector=0.82, ocr=0.99),
+        ]
+    )
+
+    assert result.state is ObservationState.NEEDS_REVIEW
+
+
+def test_unanimous_override_requires_distinct_frames() -> None:
+    result = decide_consensus(
+        [
+            candidate("ABC123", 0, detector=0.80, ocr=0.99),
+            candidate("ABC123", 1, detector=0.56, ocr=0.99),
+            candidate("ABC123", 2, detector=0.81, ocr=0.99),
+            candidate("ABC123", 2, detector=0.82, ocr=0.99),
+        ]
+    )
+
+    assert result.state is ObservationState.NEEDS_REVIEW
+
+
 def test_multiple_plates_are_ambiguous() -> None:
     result = decide_consensus([candidate("ABC123", 0)], ambiguous_plate_count=2)
     assert result.state is ObservationState.MULTIPLE_PLATES
 
 
-def test_no_plate_state() -> None:
-    assert decide_consensus([]).state is ObservationState.NO_PLATE
+def test_no_candidates_needs_review_instead_of_claiming_no_plate() -> None:
+    result = decide_consensus([])
+    assert result.state is ObservationState.NEEDS_REVIEW
+    assert "manual review" in result.reason
 
 
 def test_bad_quality_and_small_plate_needs_review() -> None:
