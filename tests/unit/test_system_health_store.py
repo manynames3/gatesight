@@ -55,6 +55,7 @@ def test_station_heartbeat_summary_reports_fresh_and_stale_stations() -> None:
                 "recordId": "station_fresh",
                 "facilityId": "fac_atlanta",
                 "name": "Main Entry",
+                "commissioned": True,
                 "createdAt": "2026-07-24T03:00:00+00:00",
                 "lastHeartbeatAt": "2026-07-24T03:21:00+00:00",
             },
@@ -62,7 +63,14 @@ def test_station_heartbeat_summary_reports_fresh_and_stale_stations() -> None:
                 "recordId": "station_stale",
                 "facilityId": "fac_dallas",
                 "name": "Main Exit",
+                "commissioned": True,
                 "createdAt": "2026-07-24T02:00:00+00:00",
+            },
+            {
+                "recordId": "station_not_commissioned",
+                "facilityId": "fac_san_diego",
+                "name": "Overflow",
+                "createdAt": "2026-07-24T01:00:00+00:00",
             },
         ]
     }
@@ -76,7 +84,10 @@ def test_station_heartbeat_summary_reports_fresh_and_stale_stations() -> None:
     )
 
     assert result["total"] == 2
+    assert result["configured"] == 3
+    assert result["uncommissioned"] == 1
     assert result["healthy"] == 1
     assert result["stale"] == 1
     assert result["stations"][0]["stationId"] == "station_fresh"
     assert result["stations"][1]["status"] == "stale"
+    assert result["stations"][2]["status"] == "not_commissioned"

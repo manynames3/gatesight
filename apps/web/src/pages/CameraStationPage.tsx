@@ -12,6 +12,8 @@ import { MotionDetector } from "../camera/motion";
 import {
   assessCapturedPlate,
   burstResemblesPlate,
+  captureGuidance,
+  selectBestFrameIndices,
 } from "../camera/plateGate";
 import { guideRegion } from "../camera/region";
 import type { PendingBurst } from "../camera/types";
@@ -252,20 +254,39 @@ export function CameraStationPage() {
           frameCount: burst.frames.length,
           capturedAtClient: burst.capturedAt.toISOString(),
           clientClockOffsetMs: clockOffsetMs,
+          guideRegion: burst.guideRegion,
         },
         captureKey("create", burst.id),
       );
-      await Promise.all(
-        session.uploads.map(async (upload, index) => {
-          const frame = burst.frames[index];
+      const uploadBatch = async (uploads: typeof session.uploads) => {
+        const results = await Promise.allSettled(
+          uploads.map(async (upload) => {
+          const frame = burst.frames[upload.frameIndex];
           if (!frame) throw new Error("Upload session frame count mismatch");
           await uploadFrame(upload, frame, abort.signal, (percent) => {
             setProgress((current) =>
-              current.map((value, itemIndex) => (itemIndex === index ? percent : value)),
+              current.map((value, itemIndex) =>
+                itemIndex === upload.frameIndex ? percent : value,
+              ),
             );
           });
-        }),
-      );
+          }),
+        );
+        return results.filter((result) => result.status === "rejected");
+      };
+      let failures = await uploadBatch(session.uploads);
+      for (let refreshAttempt = 0; failures.length > 0 && refreshAttempt < 2; refreshAttempt += 1) {
+        const refreshed = await api.refreshCaptureUploads(session.captureId);
+        if (refreshed.uploads.length === 0) {
+          failures = [];
+          break;
+        }
+        failures = await uploadBatch(refreshed.uploads);
+      }
+      if (failures.length > 0) {
+        const failure = failures[0];
+        throw failure?.status === "rejected" ? failure.reason : new Error("Upload failed");
+      }
       await api.completeCapture(
         session.captureId,
         session.uploads.map((upload) => upload.key),
@@ -323,12 +344,13 @@ export function CameraStationPage() {
       }
       await api.getServerTime();
       const capturedAt = new Date();
-      const frames = await captureBurst(
+      let frames = await captureBurst(
         streamRef.current,
         videoRef.current,
         captureCanvasRef.current,
-        4,
-        250,
+        5,
+        220,
+        350,
       );
       const assessments = [];
       for (const frame of frames) {
@@ -338,11 +360,13 @@ export function CameraStationPage() {
         frames.length = 0;
         lastCaptureAtRef.current = Date.now();
         setMessage(
-          "The four-frame check could not confirm plate-like character structure inside the guide. Nothing was uploaded; hold the plate steady and try again.",
+          `The five-frame check found no reliable plate-like character structure. Nothing was uploaded. ${captureGuidance(assessments)}`,
         );
         return;
       }
-      burst = { id: crypto.randomUUID(), capturedAt, frames };
+      const selectedIndices = selectBestFrameIndices(assessments, 4);
+      frames = selectedIndices.map((index) => frames[index]!).filter(Boolean);
+      burst = { id: crypto.randomUUID(), capturedAt, frames, guideRegion: region };
       setPending(burst);
       lastCaptureAtRef.current = Date.now();
       await processBurst(burst);

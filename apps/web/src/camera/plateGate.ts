@@ -7,7 +7,13 @@ export interface NormalizedRegion {
 
 export interface PlateAssessment {
   likelyPlate: boolean;
+  evidence: "strong" | "possible" | "none";
+  evidenceScore: number;
+  qualityScore: number;
   contrast: number;
+  meanLuminance: number;
+  darkRatio: number;
+  glareRatio: number;
   edgeDensity: number;
   verticalEdgeDensity: number;
   horizontalEdgeDensity: number;
@@ -28,7 +34,13 @@ export function analyzePlatePixels(
   if (width < 3 || height < 3 || pixels.length !== width * height * 4) {
     return {
       likelyPlate: false,
+      evidence: "none",
+      evidenceScore: 0,
+      qualityScore: 0,
       contrast: 0,
+      meanLuminance: 0,
+      darkRatio: 0,
+      glareRatio: 0,
       edgeDensity: 0,
       verticalEdgeDensity: 0,
       horizontalEdgeDensity: 0,
@@ -39,11 +51,15 @@ export function analyzePlatePixels(
 
   const luminance = new Float32Array(width * height);
   let luminanceTotal = 0;
+  let darkPixels = 0;
+  let glarePixels = 0;
   for (let pixel = 0, offset = 0; pixel < luminance.length; pixel += 1, offset += 4) {
     const value =
       pixels[offset]! * 0.299 + pixels[offset + 1]! * 0.587 + pixels[offset + 2]! * 0.114;
     luminance[pixel] = value;
     luminanceTotal += value;
+    darkPixels += Number(value <= 25);
+    glarePixels += Number(value >= 245);
   }
 
   const mean = luminanceTotal / luminance.length;
@@ -127,7 +143,7 @@ export function analyzePlatePixels(
   const horizontalEdgeDensity =
     horizontalEdges / Math.max(1, (width - 2) * textBandHeight);
 
-  const likelyPlate =
+  const strongPlate =
     contrast >= 18 &&
     edgeDensity >= 0.025 &&
     verticalEdgeDensity >= 0.018 &&
@@ -136,10 +152,44 @@ export function analyzePlatePixels(
     strokeGroups <= 48 &&
     occupiedSectors >= 3 &&
     peakRowEdgeRatio >= 0.08;
+  const possiblePlate =
+    contrast >= 10 &&
+    edgeDensity >= 0.012 &&
+    verticalEdgeDensity >= 0.009 &&
+    horizontalEdgeDensity >= 0.006 &&
+    strokeGroups >= 3 &&
+    strokeGroups <= 56 &&
+    occupiedSectors >= 2 &&
+    peakRowEdgeRatio >= 0.045;
+  const evidence = strongPlate ? "strong" : possiblePlate ? "possible" : "none";
+  const evidenceScore = [
+    contrast >= 10,
+    edgeDensity >= 0.012,
+    verticalEdgeDensity >= 0.009,
+    horizontalEdgeDensity >= 0.006,
+    strokeGroups >= 3 && strokeGroups <= 56,
+    occupiedSectors >= 2,
+    peakRowEdgeRatio >= 0.045,
+  ].filter(Boolean).length;
+  const darkRatio = darkPixels / luminance.length;
+  const glareRatio = glarePixels / luminance.length;
+  const qualityScore =
+    evidenceScore * 10 +
+    Math.min(20, contrast / 2) +
+    Math.min(12, edgeDensity * 200) +
+    Math.min(8, occupiedSectors) -
+    darkRatio * 20 -
+    glareRatio * 25;
 
   return {
-    likelyPlate,
+    likelyPlate: evidence !== "none",
+    evidence,
+    evidenceScore,
+    qualityScore,
     contrast,
+    meanLuminance: mean,
+    darkRatio,
+    glareRatio,
     edgeDensity,
     verticalEdgeDensity,
     horizontalEdgeDensity,
@@ -200,6 +250,49 @@ export async function assessCapturedPlate(
 
 export function burstResemblesPlate(assessments: PlateAssessment[]): boolean {
   if (assessments.length === 0) return false;
-  const requiredFrames = Math.max(2, Math.ceil(assessments.length / 2));
-  return assessments.filter((assessment) => assessment.likelyPlate).length >= requiredFrames;
+  const strongFrames = assessments.filter((assessment) => assessment.evidence === "strong").length;
+  const possibleFrames = assessments.filter(
+    (assessment) => assessment.evidence !== "none",
+  ).length;
+  return strongFrames >= 1 || possibleFrames >= 2;
+}
+
+export function selectBestFrameIndices(
+  assessments: PlateAssessment[],
+  maximum = 4,
+): number[] {
+  return assessments
+    .map((assessment, index) => ({ assessment, index }))
+    .sort((left, right) => {
+      const evidenceOrder = { strong: 2, possible: 1, none: 0 } as const;
+      return (
+        evidenceOrder[right.assessment.evidence] -
+          evidenceOrder[left.assessment.evidence] ||
+        right.assessment.qualityScore - left.assessment.qualityScore ||
+        left.index - right.index
+      );
+    })
+    .slice(0, maximum)
+    .map(({ index }) => index)
+    .sort((left, right) => left - right);
+}
+
+export function captureGuidance(assessments: PlateAssessment[]): string {
+  if (assessments.length === 0) return "Wait for the camera and try again.";
+  const average = (field: keyof PlateAssessment) =>
+    assessments.reduce((total, item) => total + Number(item[field]), 0) /
+    assessments.length;
+  if (average("meanLuminance") < 55 || average("darkRatio") > 0.35) {
+    return "Add light to the plate and try again.";
+  }
+  if (average("glareRatio") > 0.18) {
+    return "Tilt the plate or light slightly to reduce glare.";
+  }
+  if (average("occupiedSectors") < 2.5 || average("strokeGroups") < 3) {
+    return "Move the plate closer and keep its characters inside the guide.";
+  }
+  if (average("horizontalEdgeDensity") < 0.006) {
+    return "Hold the plate flat, level, and steady inside the guide.";
+  }
+  return "Hold the plate steady inside the guide and try again.";
 }

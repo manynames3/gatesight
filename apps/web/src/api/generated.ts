@@ -24,6 +24,7 @@ export interface Station {
   name: string;
   direction: Direction;
   armed?: boolean;
+  commissioned?: boolean;
   lastHeartbeatAt?: string;
 }
 
@@ -42,6 +43,12 @@ export interface CaptureCreated {
   receivedAtServer: string;
   estimatedCapturedAtServer: string;
   correlationId: string;
+}
+
+export interface CaptureUploadsRefreshed {
+  captureId: string;
+  status: "UPLOADING";
+  uploads: PresignedFrame[];
 }
 
 export interface CaptureResult {

@@ -20,6 +20,8 @@ STALE_AFTER_SECONDS = int(os.getenv("GATESIGHT_STALE_HEARTBEAT_SECONDS", "180"))
 
 
 def is_stale(station: dict[str, Any], cutoff: datetime) -> bool:
+    if station.get("commissioned") is not True:
+        return False
     raw = station.get("lastHeartbeatAt") or station.get("createdAt")
     if not isinstance(raw, str):
         return True
@@ -40,14 +42,15 @@ def _stale_station_count() -> tuple[int, int]:
     exclusive_start_key: dict[str, Any] | None = None
     while True:
         arguments: dict[str, Any] = {
-            "ProjectionExpression": "tenantId, recordId, createdAt, lastHeartbeatAt"
+            "ProjectionExpression": ("tenantId, recordId, commissioned, createdAt, lastHeartbeatAt")
         }
         if exclusive_start_key:
             arguments["ExclusiveStartKey"] = exclusive_start_key
         response = table.scan(**arguments)
         items = response.get("Items", [])
-        scanned += len(items)
-        stale += sum(1 for station in items if is_stale(station, cutoff))
+        commissioned = [station for station in items if station.get("commissioned") is True]
+        scanned += len(commissioned)
+        stale += sum(1 for station in commissioned if is_stale(station, cutoff))
         exclusive_start_key = response.get("LastEvaluatedKey")
         if not exclusive_start_key:
             break

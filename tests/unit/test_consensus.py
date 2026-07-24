@@ -12,6 +12,7 @@ def candidate(
     ocr: float = 0.99,
     usable: bool = True,
     pixels: int = 180,
+    source: str = "DETECTOR",
 ) -> PlateCandidate:
     return PlateCandidate(
         frame_index=frame,
@@ -29,6 +30,7 @@ def candidate(
             usable=usable,
         ),
         bounding_box=(10, 10, 10 + pixels, 80),
+        source=source,
     )
 
 
@@ -83,6 +85,41 @@ def test_unanimous_override_rejects_weak_detector_evidence() -> None:
             candidate("ABC123", 2, detector=0.81, ocr=0.99),
             candidate("ABC123", 3, detector=0.82, ocr=0.99),
         ]
+    )
+
+    assert result.state is ObservationState.NEEDS_REVIEW
+
+
+def test_unanimous_guide_fallback_can_recognize_without_detector_evidence() -> None:
+    result = decide_consensus(
+        [
+            candidate("ABC123", frame, detector=0, ocr=0.995, source="GUIDE_FALLBACK")
+            for frame in range(4)
+        ]
+    )
+
+    assert result.state is ObservationState.RECOGNIZED
+    assert result.normalized_text == "ABC123"
+
+
+def test_guide_fallback_below_unanimous_ocr_threshold_needs_review() -> None:
+    result = decide_consensus(
+        [
+            candidate("ABC123", frame, detector=0, ocr=0.97, source="GUIDE_FALLBACK")
+            for frame in range(4)
+        ]
+    )
+
+    assert result.state is ObservationState.NEEDS_REVIEW
+
+
+def test_guide_fallback_never_uses_the_regular_score_threshold() -> None:
+    result = decide_consensus(
+        [
+            candidate("ABC123", frame, detector=0, ocr=0.995, source="GUIDE_FALLBACK")
+            for frame in range(2)
+        ],
+        ConsensusThresholds(high_confidence=0.5),
     )
 
     assert result.state is ObservationState.NEEDS_REVIEW

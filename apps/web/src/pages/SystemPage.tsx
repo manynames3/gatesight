@@ -127,6 +127,7 @@ export function SystemPage() {
               value={`${components.stations.healthy}/${components.stations.total} reporting`}
             >
               <span>{components.stations.stale} stale</span>
+              <span>{components.stations.uncommissioned} not commissioned</span>
               <span>Fresh within {components.stations.staleAfterSeconds}s</span>
             </HealthCard>
             <HealthCard
@@ -158,7 +159,11 @@ export function SystemPage() {
                       <td>{station.name}</td>
                       <td>{station.facilityId}</td>
                       <td>{timestamp(station.lastHeartbeatAt)}</td>
-                      <td><StatusChip tone={station.status === "healthy" ? "good" : "warn"}>{station.status}</StatusChip></td>
+                      <td>
+                        <StatusChip tone={station.status === "healthy" ? "good" : "warn"}>
+                          {station.status.replaceAll("_", " ")}
+                        </StatusChip>
+                      </td>
                     </tr>
                   ))}
                   {components.stations.stations.length === 0 && (

@@ -1,6 +1,7 @@
 import type {
   CaptureCreated,
   CaptureResult,
+  CaptureUploadsRefreshed,
   Facility,
   Page,
   Station,
@@ -45,6 +46,8 @@ export interface SystemHealth {
     };
     stations: {
       status: OperationalStatus;
+      configured: number;
+      uncommissioned: number;
       total: number;
       healthy: number;
       stale: number;
@@ -54,7 +57,8 @@ export interface SystemHealth {
         facilityId: string;
         name: string;
         lastHeartbeatAt: string | null;
-        status: "healthy" | "stale";
+        commissioned: boolean;
+        status: "healthy" | "stale" | "not_commissioned";
       }>;
     };
     deadLetterQueue: {
@@ -163,6 +167,13 @@ export class ApiClient {
       frameCount: number;
       capturedAtClient: string;
       clientClockOffsetMs: number;
+      guideRegion?: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      };
+      synthetic?: boolean;
     },
     key: string,
   ): Promise<CaptureCreated> {
@@ -170,6 +181,13 @@ export class ApiClient {
       "/v1/captures",
       { method: "POST", body: JSON.stringify(body) },
       key,
+    );
+  }
+
+  refreshCaptureUploads(captureId: string): Promise<CaptureUploadsRefreshed> {
+    return this.request(
+      `/v1/captures/${encodeURIComponent(captureId)}/refresh-uploads`,
+      { method: "POST" },
     );
   }
 

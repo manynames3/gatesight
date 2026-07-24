@@ -65,8 +65,10 @@ export async function captureBurst(
   canvas: HTMLCanvasElement,
   frameCount = 4,
   intervalMilliseconds = 250,
+  settleMilliseconds = 0,
 ): Promise<Blob[]> {
   if (frameCount < 3 || frameCount > 5) throw new Error("Burst must contain 3 to 5 frames");
+  if (settleMilliseconds > 0) await sleep(settleMilliseconds);
   const frames: Blob[] = [];
   for (let index = 0; index < frameCount; index += 1) {
     frames.push(await takePhoto(stream, video, canvas));

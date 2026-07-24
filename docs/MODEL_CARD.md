@@ -23,6 +23,11 @@ Hashes, URLs, byte sizes, and license review state are in `ml/model-manifest.jso
 
 Automation requires compatible evidence across usable frames, strong combined evidence, and no conflicting high-confidence reading. Four unanimous high-confidence frames may be accepted even when the conservative composite score remains below the alert threshold.
 
+The worker searches the operator guide before the full frame. If neither
+detector pass returns a candidate, exact OCR agreement across all four guide
+crops requires at least 0.98 OCR confidence per frame before automatic
+acceptance.
+
 Multiple plausible plates, small/blurred/glared crops, one-frame detections, low confidence, conflict, or no detector candidates require review. “No candidates” is not evidence that no plate was present.
 
 Normalization never substitutes characters. Regional patterns can inform review only.
@@ -42,6 +47,9 @@ PaddleOCR PP-OCRv6-small is a separately installed challenger. Replacement requi
 ## Monitoring
 
 Monitor recognition state rates, review/not-detected rate, processing duration, cold starts, failures, and false-alert outcomes from reviewed samples. Never use plate values as metric dimensions.
+
+Also monitor guide detector hits, guide OCR fallbacks, full-frame fallbacks,
+upload refreshes, and reissued frame counts.
 
 ## Release gate
 

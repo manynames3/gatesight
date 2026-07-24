@@ -159,4 +159,31 @@ describe("ApiClient authentication", () => {
       "https://api.example.test/v1/system/health",
     );
   });
+
+  it("requests fresh upload instructions for an existing capture", async () => {
+    const token = vi
+      .fn<(forceRefresh?: boolean) => Promise<string | undefined>>()
+      .mockResolvedValue("current-token");
+    const response = {
+      captureId: "cap_01J123456789ABCDEFGHJKMNPQ",
+      status: "UPLOADING",
+      uploads: [],
+    };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify(response), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test", token);
+
+    await expect(
+      client.refreshCaptureUploads("cap_01J123456789ABCDEFGHJKMNPQ"),
+    ).resolves.toEqual(response);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/v1/captures/cap_01J123456789ABCDEFGHJKMNPQ/refresh-uploads",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+  });
 });

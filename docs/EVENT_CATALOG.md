@@ -12,6 +12,10 @@ exact object keys, audit timestamps, and facility timezone. Current browser
 capture sends four keys; the contract accepts three to five. It never includes
 bytes, plate text, email, or tokens.
 
+It may also carry normalized guide coordinates and an administrator-only
+`synthetic` marker. The marker lets deployment canaries exercise visits while
+remaining ineligible for security alerts.
+
 Producer: control API after explicit completion and `HeadObject` verification.
 Consumer: recognition worker, batch size 1.
 Delivery: at least once; retry and DLQ.

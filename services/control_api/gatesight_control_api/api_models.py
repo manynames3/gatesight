@@ -5,7 +5,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from gatesight_domain.models import Direction, RegistrationStatus, ReviewDecision
+from gatesight_domain.models import (
+    Direction,
+    NormalizedRegion,
+    RegistrationStatus,
+    ReviewDecision,
+)
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 IdempotencyKey = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9._:-]{16,128}$")]
@@ -39,6 +44,8 @@ class CaptureCreate(ApiModel):
     frame_count: int = Field(ge=3, le=5, alias="frameCount")
     captured_at_client: datetime = Field(alias="capturedAtClient")
     client_clock_offset_ms: int = Field(ge=-86_400_000, le=86_400_000, alias="clientClockOffsetMs")
+    guide_region: NormalizedRegion | None = Field(default=None, alias="guideRegion")
+    synthetic: bool = False
 
 
 class PresignedFrame(ApiModel):
@@ -56,6 +63,12 @@ class CaptureCreated(ApiModel):
     received_at_server: datetime = Field(alias="receivedAtServer")
     estimated_captured_at_server: datetime = Field(alias="estimatedCapturedAtServer")
     correlation_id: str = Field(alias="correlationId")
+
+
+class CaptureUploadsRefreshed(ApiModel):
+    capture_id: str = Field(alias="captureId")
+    status: Literal["UPLOADING"]
+    uploads: list[PresignedFrame]
 
 
 class CaptureComplete(ApiModel):

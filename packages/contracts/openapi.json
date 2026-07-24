@@ -46,11 +46,26 @@
             "title": "Framecount",
             "type": "integer"
           },
+          "guideRegion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NormalizedRegion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "stationId": {
             "maxLength": 64,
             "minLength": 10,
             "title": "Stationid",
             "type": "string"
+          },
+          "synthetic": {
+            "default": false,
+            "title": "Synthetic",
+            "type": "boolean"
           }
         },
         "required": [
@@ -106,6 +121,34 @@
           "correlationId"
         ],
         "title": "CaptureCreated",
+        "type": "object"
+      },
+      "CaptureUploadsRefreshed": {
+        "additionalProperties": false,
+        "properties": {
+          "captureId": {
+            "title": "Captureid",
+            "type": "string"
+          },
+          "status": {
+            "const": "UPLOADING",
+            "title": "Status",
+            "type": "string"
+          },
+          "uploads": {
+            "items": {
+              "$ref": "#/components/schemas/PresignedFrame"
+            },
+            "title": "Uploads",
+            "type": "array"
+          }
+        },
+        "required": [
+          "captureId",
+          "status",
+          "uploads"
+        ],
+        "title": "CaptureUploadsRefreshed",
         "type": "object"
       },
       "Direction": {
@@ -182,6 +225,43 @@
           "client_time"
         ],
         "title": "HeartbeatRequest",
+        "type": "object"
+      },
+      "NormalizedRegion": {
+        "additionalProperties": false,
+        "properties": {
+          "height": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "Height",
+            "type": "number"
+          },
+          "width": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "Width",
+            "type": "number"
+          },
+          "x": {
+            "exclusiveMaximum": 1.0,
+            "minimum": 0.0,
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "exclusiveMaximum": 1.0,
+            "minimum": 0.0,
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "width",
+          "height"
+        ],
+        "title": "NormalizedRegion",
         "type": "object"
       },
       "ObservationReview": {
@@ -927,6 +1007,61 @@
           }
         },
         "summary": "Complete Capture"
+      }
+    },
+    "/v1/captures/{capture_id}/refresh-uploads": {
+      "post": {
+        "operationId": "refresh_capture_uploads_v1_captures__capture_id__refresh_uploads_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "capture_id",
+            "required": true,
+            "schema": {
+              "title": "Capture Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-gatesight-dev-claims",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Gatesight-Dev-Claims"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureUploadsRefreshed"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Capture Uploads"
       }
     },
     "/v1/captures/{capture_id}/retry": {

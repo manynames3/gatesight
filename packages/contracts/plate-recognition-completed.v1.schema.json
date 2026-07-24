@@ -50,7 +50,8 @@
         },
         "captured_at": {"type": "string", "format": "date-time"},
         "confidence_category": {"enum": ["HIGH", "MEDIUM", "LOW", "NONE"]},
-        "lookup_token": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"}
+        "lookup_token": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+        "synthetic": {"type": "boolean", "default": false}
       }
     }
   }

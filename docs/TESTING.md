@@ -8,6 +8,7 @@ The test strategy answers one question: what evidence do we have that GateSight 
 - Static checks protect type, formatting, infrastructure, and supply-chain boundaries.
 - Real AWS tests prove cloud integration.
 - Physical tests prove the camera, browser, network, and operator workflow.
+- The deployment canary proves capture, recognition, entry/exit projection, and media deletion.
 
 No single layer is allowed to claim coverage that belongs to another.
 
@@ -36,6 +37,9 @@ No single layer is allowed to claim coverage that belongs to another.
 | Media deletion | API/S3 integration + audit assertion |
 | DLQ redrive | real AWS E2E/runbook exercise |
 | Raw plate absent from logs | structured logging capture test and CloudWatch query review |
+| Guide detector miss / OCR fallback | recognition-engine and consensus tests + canary |
+| Fresh upload instructions | S3 verification and API/client tests |
+| Uncommissioned station | health-store and heartbeat-monitor tests |
 
 Some scenarios require deployed-service fault injection. Local mocks are useful, but they are never presented as production proof.
 
@@ -55,3 +59,17 @@ terraform fmt -check -recursive infrastructure/terraform
 ```
 
 Set `GATESIGHT_AWS_E2E=1` only for the named, temporary AWS environment. Physical camera testing is never fully automated.
+
+## Reliability release targets
+
+These are release gates, not current performance claims:
+
+- less than 1% false rejection before upload;
+- at least 99% detector recall for a guide-aligned plate;
+- at least 98% exact accuracy among automatically accepted readings;
+- at least 99.5% successful AWS capture completion;
+- zero security alerts from review, uncertainty, or synthetic canaries; and
+- capture-to-observation p95 below 10 seconds warm and 20 seconds cold.
+
+Measure them on a rights-cleared, facility-representative dataset before calling
+the system production-ready.
