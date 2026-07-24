@@ -9,6 +9,11 @@ import type {
 import { pollCapture } from "../api/poll";
 import { captureBurst } from "../camera/capture";
 import { MotionDetector } from "../camera/motion";
+import {
+  assessCapturedPlate,
+  assessLivePlate,
+  burstResemblesPlate,
+} from "../camera/plateGate";
 import type { PendingBurst } from "../camera/types";
 import { uploadFrame } from "../camera/upload";
 import { StatusChip } from "../components/StatusChip";
@@ -301,6 +306,18 @@ export function CameraStationPage() {
     setCaptureResult(null);
     let burst: PendingBurst | null = null;
     try {
+      const liveAssessment = assessLivePlate(
+        videoRef.current,
+        captureCanvasRef.current,
+        region,
+      );
+      if (!liveAssessment.likelyPlate) {
+        lastCaptureAtRef.current = Date.now();
+        setMessage(
+          "No plate-like letters or numbers were detected inside the guide. Nothing was captured or uploaded.",
+        );
+        return;
+      }
       await api.getServerTime();
       const capturedAt = new Date();
       const frames = await captureBurst(
@@ -310,6 +327,18 @@ export function CameraStationPage() {
         4,
         250,
       );
+      const assessments = [];
+      for (const frame of frames) {
+        assessments.push(await assessCapturedPlate(frame, captureCanvasRef.current, region));
+      }
+      if (!burstResemblesPlate(assessments)) {
+        frames.length = 0;
+        lastCaptureAtRef.current = Date.now();
+        setMessage(
+          "The burst did not consistently resemble a plate with letters or numbers. Nothing was retained or uploaded.",
+        );
+        return;
+      }
       burst = { id: crypto.randomUUID(), capturedAt, frames };
       setPending(burst);
       lastCaptureAtRef.current = Date.now();
@@ -415,7 +444,7 @@ export function CameraStationPage() {
         <div>
           <p className="eyebrow">LIVE GATE</p>
           <h1>Camera station</h1>
-          <p>Capture immediately; recognition never blocks the lane.</p>
+          <p>Plate-like text is checked locally before anything is retained or uploaded.</p>
         </div>
         <div className="header-status">
           <StatusChip tone={online ? "good" : "danger"}>{online ? "Online" : "Offline"}</StatusChip>

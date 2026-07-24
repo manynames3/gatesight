@@ -22,6 +22,7 @@ export default defineConfig({
       include: [
         "src/camera/capture.ts",
         "src/camera/motion.ts",
+        "src/camera/plateGate.ts",
         "src/api/poll.ts",
         "src/hooks/useCamera.ts",
       ],
