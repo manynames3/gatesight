@@ -210,7 +210,7 @@ class AwsStore:
             for message in messages
         ]
 
-    def queue_summary(self, queue_url: str) -> dict[str, int | bool]:
+    def queue_summary(self, queue_url: str) -> dict[str, Any]:
         if not queue_url:
             return {
                 "configured": False,

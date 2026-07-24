@@ -40,6 +40,7 @@ resource "aws_apigatewayv2_route" "default" {
 }
 
 resource "aws_apigatewayv2_route" "cors_preflight" {
+  #checkov:skip=CKV_AWS_309:CORS preflight must be unauthenticated; all application routes remain protected by the JWT-authorized default route.
   api_id             = aws_apigatewayv2_api.main.id
   route_key          = "OPTIONS /{proxy+}"
   target             = "integrations/${aws_apigatewayv2_integration.control_api.id}"
