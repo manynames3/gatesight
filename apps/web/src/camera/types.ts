@@ -11,6 +11,12 @@ export interface PendingBurst {
   id: string;
   capturedAt: Date;
   frames: Blob[];
+  guideRegion: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
 }
 
 export interface MotionSample {

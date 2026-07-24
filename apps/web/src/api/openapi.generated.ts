@@ -106,6 +106,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/captures/{capture_id}/refresh-uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Capture Uploads */
+        post: operations["refresh_capture_uploads_v1_captures__capture_id__refresh_uploads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/captures/{capture_id}/retry": {
         parameters: {
             query?: never;
@@ -421,8 +438,14 @@ export interface components {
             facilityId: string;
             /** Framecount */
             frameCount: number;
+            guideRegion?: components["schemas"]["NormalizedRegion"] | null;
             /** Stationid */
             stationId: string;
+            /**
+             * Synthetic
+             * @default false
+             */
+            synthetic: boolean;
         };
         /** CaptureCreated */
         CaptureCreated: {
@@ -440,6 +463,18 @@ export interface components {
              * Format: date-time
              */
             receivedAtServer: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "UPLOADING";
+            /** Uploads */
+            uploads: components["schemas"]["PresignedFrame"][];
+        };
+        /** CaptureUploadsRefreshed */
+        CaptureUploadsRefreshed: {
+            /** Captureid */
+            captureId: string;
             /**
              * Status
              * @constant
@@ -476,6 +511,17 @@ export interface components {
              * Format: date-time
              */
             client_time: string;
+        };
+        /** NormalizedRegion */
+        NormalizedRegion: {
+            /** Height */
+            height: number;
+            /** Width */
+            width: number;
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
         };
         /** ObservationReview */
         ObservationReview: {
@@ -794,6 +840,39 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_capture_uploads_v1_captures__capture_id__refresh_uploads_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-gatesight-dev-claims"?: string | null;
+            };
+            path: {
+                capture_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureUploadsRefreshed"];
                 };
             };
             /** @description Validation Error */

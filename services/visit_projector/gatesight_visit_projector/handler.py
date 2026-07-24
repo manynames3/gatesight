@@ -37,8 +37,19 @@ def _serialize(item: dict[str, Any]) -> dict[str, Any]:
     return {key: serializer.serialize(value) for key, value in item.items()}
 
 
-def _plate_state_id(tenant_id: str, facility_id: str, normalized_plate: str) -> str:
-    digest = hashlib.sha256(f"{tenant_id}:{facility_id}:{normalized_plate}".encode()).hexdigest()
+def _plate_state_id(
+    tenant_id: str,
+    facility_id: str,
+    normalized_plate: str,
+    *,
+    synthetic: bool,
+) -> str:
+    identity = (
+        f"{tenant_id}:{facility_id}:synthetic:{normalized_plate}"
+        if synthetic
+        else f"{tenant_id}:{facility_id}:{normalized_plate}"
+    )
+    digest = hashlib.sha256(identity.encode()).hexdigest()
     return f"state_{digest}"
 
 
@@ -59,7 +70,10 @@ def project(event: DomainEvent) -> None:
         raise RuntimeError("recognized observation is unavailable")
     observed_at = event.data.captured_at
     state_id = _plate_state_id(
-        event.tenant_id, event.data.facility_id, observation["normalizedPlate"]
+        event.tenant_id,
+        event.data.facility_id,
+        observation["normalizedPlate"],
+        synthetic=event.data.synthetic,
     )
     visits = dynamodb.Table(f"{TABLE_PREFIX}-visits")
     state = visits.get_item(
@@ -110,6 +124,7 @@ def project(event: DomainEvent) -> None:
             "entryObservationId": event.data.observation_id,
             "entryAt": observed_at.isoformat(),
             "status": "OPEN",
+            "synthetic": event.data.synthetic,
             "facilityOpen": f"{event.data.facility_id}#OPEN",
             "createdAt": datetime.now(UTC).isoformat(),
         }
@@ -200,6 +215,7 @@ def project(event: DomainEvent) -> None:
             "facilityId": event.data.facility_id,
             "observationId": event.data.observation_id,
             "anomaly": outcome.anomaly or "DUPLICATE_SUPPRESSED",
+            "synthetic": event.data.synthetic,
             "occurredAt": observed_at.isoformat(),
             "createdAt": datetime.now(UTC).isoformat(),
         }

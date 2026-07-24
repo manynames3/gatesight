@@ -111,7 +111,22 @@ def record_handler(record: SQSRecord) -> None:
             )
             for key in job.s3_keys
         ]
-        output = engine().infer(frames)
+        output = engine().infer(frames, job.guide_region)
+        metrics.add_metric(
+            name="GuideDetectorFrames",
+            unit=MetricUnit.Count,
+            value=output.guide_detector_frames,
+        )
+        metrics.add_metric(
+            name="GuideOcrFallbackFrames",
+            unit=MetricUnit.Count,
+            value=output.guide_fallback_frames,
+        )
+        metrics.add_metric(
+            name="FullFrameFallbackFrames",
+            unit=MetricUnit.Count,
+            value=output.full_frame_fallback_frames,
+        )
         thresholds = ConsensusThresholds(
             high_confidence=HIGH_CONFIDENCE,
             review_confidence=REVIEW_CONFIDENCE,
@@ -161,6 +176,7 @@ def record_handler(record: SQSRecord) -> None:
                 state=consensus.state,
                 captured_at=job.estimated_captured_at_server,
                 confidence_category=confidence_category(consensus.consensus_score),
+                synthetic=job.synthetic,
             ),
         )
         repository.complete(

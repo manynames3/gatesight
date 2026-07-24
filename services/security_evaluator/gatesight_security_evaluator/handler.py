@@ -86,6 +86,9 @@ def _alert_id(
 
 @tracer.capture_method
 def evaluate(event: DomainEvent) -> None:
+    if event.data.synthetic:
+        logger.info("synthetic observation excluded from security evaluation")
+        return
     if event.data.confidence_category != "HIGH":
         logger.info("observation is below high-confidence alert threshold")
         return

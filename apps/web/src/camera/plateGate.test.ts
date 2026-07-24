@@ -1,6 +1,8 @@
 import {
   analyzePlatePixels,
   burstResemblesPlate,
+  captureGuidance,
+  selectBestFrameIndices,
   type PlateAssessment,
 } from "./plateGate";
 import { describe, expect, it } from "vitest";
@@ -67,7 +69,13 @@ function denseClosePlate() {
 function assessment(likelyPlate: boolean): PlateAssessment {
   return {
     likelyPlate,
+    evidence: likelyPlate ? "strong" : "none",
+    evidenceScore: likelyPlate ? 7 : 0,
+    qualityScore: likelyPlate ? 80 : 0,
     contrast: 0,
+    meanLuminance: 120,
+    darkRatio: 0,
+    glareRatio: 0,
     edgeDensity: 0,
     verticalEdgeDensity: 0,
     horizontalEdgeDensity: 0,
@@ -111,7 +119,7 @@ describe("plate likeness gate", () => {
     expect(result.likelyPlate).toBe(false);
   });
 
-  it("requires plate-like evidence in at least half of a four-frame burst", () => {
+  it("accepts one strong frame or two possible frames without accepting blanks", () => {
     expect(
       burstResemblesPlate([
         assessment(true),
@@ -127,6 +135,37 @@ describe("plate likeness gate", () => {
         assessment(false),
         assessment(false),
       ]),
-    ).toBe(false);
+    ).toBe(true);
+    expect(
+      burstResemblesPlate([
+        { ...assessment(false), likelyPlate: true, evidence: "possible" },
+        { ...assessment(false), likelyPlate: true, evidence: "possible" },
+        assessment(false),
+      ]),
+    ).toBe(true);
+    expect(burstResemblesPlate([assessment(false), assessment(false)])).toBe(false);
+  });
+
+  it("keeps the strongest four frames in their original order", () => {
+    const assessments = [
+      { ...assessment(true), qualityScore: 60 },
+      { ...assessment(false), qualityScore: 20 },
+      { ...assessment(true), qualityScore: 90 },
+      { ...assessment(true), qualityScore: 70 },
+      { ...assessment(true), qualityScore: 80 },
+    ];
+    expect(selectBestFrameIndices(assessments, 4)).toEqual([0, 2, 3, 4]);
+  });
+
+  it("gives actionable guidance for dark captures", () => {
+    expect(
+      captureGuidance([
+        {
+          ...assessment(false),
+          meanLuminance: 20,
+          darkRatio: 0.8,
+        },
+      ]),
+    ).toContain("light");
   });
 });

@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 PlateText = Annotated[str, StringConstraints(pattern=r"^[A-Z0-9]{1,12}$")]
 Identifier = Annotated[str, StringConstraints(min_length=10, max_length=64)]
@@ -18,6 +25,19 @@ def utc_now() -> datetime:
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class NormalizedRegion(StrictModel):
+    x: float = Field(ge=0, lt=1)
+    y: float = Field(ge=0, lt=1)
+    width: float = Field(gt=0, le=1)
+    height: float = Field(gt=0, le=1)
+
+    @model_validator(mode="after")
+    def fits_inside_frame(self) -> Self:
+        if self.x + self.width > 1 or self.y + self.height > 1:
+            raise ValueError("normalized region must fit inside the frame")
+        return self
 
 
 class Direction(StrEnum):
@@ -84,6 +104,7 @@ class PlateCandidate(StrictModel):
     region_confidence: float | None = Field(default=None, ge=0, le=1)
     quality: FrameQuality
     bounding_box: tuple[int, int, int, int]
+    source: Literal["DETECTOR", "GUIDE_FALLBACK"] = "DETECTOR"
 
 
 class ConsensusResult(StrictModel):
@@ -116,6 +137,8 @@ class RecognitionJob(StrictModel):
     estimated_captured_at_server: datetime
     received_at_server: datetime
     facility_timezone: str = Field(min_length=1, max_length=64)
+    guide_region: NormalizedRegion | None = None
+    synthetic: bool = False
 
 
 class CompletedEventData(StrictModel):
@@ -128,6 +151,7 @@ class CompletedEventData(StrictModel):
     captured_at: datetime
     confidence_category: Literal["HIGH", "MEDIUM", "LOW", "NONE"]
     lookup_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    synthetic: bool = False
 
 
 class DomainEvent(StrictModel):

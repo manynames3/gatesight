@@ -49,9 +49,11 @@ The goal is not “OCR at any cost.” The goal is a trustworthy gate record tha
 ```text
 Camera
   ↓
-4 in-memory frames
+5 in-memory candidate frames
   ↓
-Local plate-likeness check
+Recall-first plate-likeness check
+  ↓
+Best 4 frames selected
   ↓
 Private S3 upload
   ↓
@@ -69,9 +71,10 @@ Observation saved
 
 - The app requests video only—never microphone access.
 - The operator can choose any camera exposed by the browser.
-- Manual and automatic capture use the same four-frame path.
+- Manual and automatic capture use the same best-four-of-five path.
 - Frames stay in memory until upload or discard.
-- At least two frames must show plate-like character structure before upload.
+- One strong frame or two possible frames must show plate-like character structure before upload.
+- The app favors sharp, evenly lit frames and gives distance, glare, lighting, or alignment guidance when it rejects a burst.
 - Blank scenes and simple non-character patterns are discarded without upload.
 - Closing the tab before upload can lose the frames because GateSight intentionally creates no offline copy.
 
@@ -80,7 +83,7 @@ Observation saved
 - The browser uploads JPEGs directly to private S3.
 - The control API verifies every expected object before queueing work.
 - SQS buffers recognition and handles retry/backpressure.
-- A Python Lambda container runs detection, crop processing, OCR, and consensus.
+- A Python Lambda container searches the guide first, falls back to the full frame, and runs crop processing, OCR, and consensus.
 - One DynamoDB transaction saves the observation, capture result, and outbox event.
 - EventBridge sends the completed result to independent visit and security consumers.
 
@@ -93,7 +96,7 @@ These screenshots use authorized portfolio test data.
 ![GateSight camera station with a plate aligned inside the capture guide](docs/images/camera-station.webp)
 
 The station keeps facility, gate, camera, and connection status in one view. The
-green confirmation means AWS verified the uploaded four-frame burst; recognition
+green confirmation means AWS verified the selected four-frame burst; recognition
 continues asynchronously while the station remains ready.
 
 ### Review every recognition outcome
@@ -165,6 +168,10 @@ The production profile uses:
 GateSight does not accept a reading simply because one frame produced text.
 
 Automatic recognition requires compatible evidence across usable frames. Conflicting high-confidence readings go to review. Multiple plausible plates go to review. If the detector returns no candidate, GateSight says review is required—it does not claim that no plate was present.
+
+When guide and full-frame detection both miss, four unanimous, exceptionally
+strong OCR readings from the known guide crop may still be accepted. Anything
+less remains review work.
 
 Current outcomes are:
 
@@ -302,6 +309,7 @@ At a high level:
 6. Package the ZIP Lambdas.
 7. Review and apply Terraform.
 8. Run authenticated smoke and physical camera tests.
+9. Run a synthetic entry/exit canary through recognition and visit projection.
 
 The recognition worker can be built entirely in GitHub Actions; local Docker Desktop is not required for that path.
 

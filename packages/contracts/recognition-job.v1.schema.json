@@ -32,6 +32,18 @@
     "captured_at_client": {"type": "string", "format": "date-time"},
     "estimated_captured_at_server": {"type": "string", "format": "date-time"},
     "received_at_server": {"type": "string", "format": "date-time"},
-    "facility_timezone": {"type": "string"}
+    "facility_timezone": {"type": "string"},
+    "guide_region": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": {"type": "number", "minimum": 0, "exclusiveMaximum": 1},
+        "y": {"type": "number", "minimum": 0, "exclusiveMaximum": 1},
+        "width": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "height": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+      }
+    },
+    "synthetic": {"type": "boolean", "default": false}
   }
 }

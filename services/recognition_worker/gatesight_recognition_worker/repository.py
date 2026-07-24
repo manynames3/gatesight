@@ -140,6 +140,7 @@ class RecognitionRepository:
             "processingCompletedAt": completed_at.isoformat(),
             "processingDurationMs": int((completed_at - started_at).total_seconds() * 1000),
             "facilityTimezone": job.facility_timezone,
+            "synthetic": job.synthetic,
             "mediaAvailable": True,
             "derivedCropKeys": derived_crop_keys,
             "reviewDecision": "PENDING",

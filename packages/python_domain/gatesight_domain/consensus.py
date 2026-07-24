@@ -19,6 +19,7 @@ class ConsensusThresholds:
     unanimous_frames: int = 4
     unanimous_ocr_confidence: float = 0.95
     unanimous_detector_confidence: float = 0.55
+    unanimous_guide_ocr_confidence: float = 0.98
 
 
 def levenshtein(left: str, right: str) -> int:
@@ -51,7 +52,8 @@ def _candidate_weight(candidate: PlateCandidate) -> float:
         + (quality.perspective_score * 0.15)
         + (plate_size * 0.1)
     )
-    return candidate.detector_confidence * candidate.ocr_confidence * visual
+    source_evidence = candidate.detector_confidence if candidate.source == "DETECTOR" else 0.65
+    return source_evidence * candidate.ocr_confidence * visual
 
 
 def decide_consensus(
@@ -113,19 +115,32 @@ def decide_consensus(
         for text, group in ranked[1:]
     )
     winner_frame_ids = {candidate.frame_index for candidate in winner}
+    contains_guide_fallback = any(candidate.source == "GUIDE_FALLBACK" for candidate in winner)
     unanimous_high_confidence = (
         len(winner) >= thresholds.unanimous_frames
         and len(winner) == len(items)
         and len(winner_frame_ids) == len(winner)
         and all(
-            candidate.ocr_confidence >= thresholds.unanimous_ocr_confidence
-            and candidate.detector_confidence >= thresholds.unanimous_detector_confidence
+            candidate.ocr_confidence >= thresholds.unanimous_ocr_confidence for candidate in winner
+        )
+        and all(
+            (
+                candidate.source == "DETECTOR"
+                and candidate.detector_confidence >= thresholds.unanimous_detector_confidence
+            )
+            or (
+                candidate.source == "GUIDE_FALLBACK"
+                and candidate.ocr_confidence >= thresholds.unanimous_guide_ocr_confidence
+            )
             for candidate in winner
         )
     )
     if (
         len(winner) >= thresholds.minimum_good_frames
-        and (score >= thresholds.high_confidence or unanimous_high_confidence)
+        and (
+            (score >= thresholds.high_confidence and not contains_guide_fallback)
+            or unanimous_high_confidence
+        )
         and not high_conflict
     ):
         return ConsensusResult(

@@ -161,6 +161,18 @@ class AwsStore:
             raise ValueError("capture metadata does not match")
         return dict(result)
 
+    def frame_is_verified(self, key: str, capture_id: str) -> bool:
+        try:
+            self.head_frame(key, capture_id)
+        except ValueError:
+            return False
+        except ClientError as error:
+            code = str(error.response.get("Error", {}).get("Code", ""))
+            if code in {"404", "NoSuchKey", "NotFound"}:
+                return False
+            raise
+        return True
+
     def enqueue(self, job: dict[str, Any]) -> str:
         result = self.sqs.send_message(
             QueueUrl=settings.recognition_queue_url,
@@ -308,13 +320,14 @@ class AwsStore:
         items = self._tenant_projection(
             "stations",
             tenant_id,
-            "recordId, facilityId, #name, createdAt, lastHeartbeatAt",
+            "recordId, facilityId, #name, commissioned, createdAt, lastHeartbeatAt",
             {"#name": "name"},
         )
         cutoff = checked_at - timedelta(seconds=stale_after_seconds)
         stations = []
         healthy = 0
         for item in items:
+            commissioned = item.get("commissioned") is True
             raw_observed = item.get("lastHeartbeatAt") or item.get("createdAt")
             observed: datetime | None = None
             if isinstance(raw_observed, str):
@@ -324,7 +337,13 @@ class AwsStore:
                         observed = observed.replace(tzinfo=UTC)
                 except ValueError:
                     observed = None
-            station_status = "healthy" if observed and observed >= cutoff else "stale"
+            station_status = (
+                "not_commissioned"
+                if not commissioned
+                else "healthy"
+                if observed and observed >= cutoff
+                else "stale"
+            )
             healthy += int(station_status == "healthy")
             stations.append(
                 {
@@ -333,16 +352,22 @@ class AwsStore:
                     "name": item.get("name"),
                     "lastHeartbeatAt": item.get("lastHeartbeatAt"),
                     "status": station_status,
+                    "commissioned": commissioned,
                 }
             )
         stations.sort(
             key=lambda station: str(station.get("lastHeartbeatAt") or ""),
             reverse=True,
         )
+        commissioned_count = sum(
+            1 for station in stations if station["status"] != "not_commissioned"
+        )
         return {
-            "total": len(stations),
+            "configured": len(stations),
+            "uncommissioned": len(stations) - commissioned_count,
+            "total": commissioned_count,
             "healthy": healthy,
-            "stale": len(stations) - healthy,
+            "stale": commissioned_count - healthy,
             "staleAfterSeconds": stale_after_seconds,
             "stations": stations,
         }

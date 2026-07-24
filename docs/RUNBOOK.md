@@ -17,6 +17,7 @@ Use this guide when GateSight is slow, unavailable, backed up, or producing an u
 | Observation exists but visits/alerts do not | Outbox and consumer errors |
 | Automatic capture stopped | Stale station |
 | A deployment caused the problem | Rollback |
+| Deployment canary failed | Canary failure |
 | A user requested image removal | Media deletion |
 
 ## First triage
@@ -52,6 +53,18 @@ Pending rows remain durable. A publish-before-update retry can duplicate an even
    unreliable.
 4. Restore the station and complete a physical test burst.
 5. Align alarm schedules with facility operating hours.
+
+Logical stations do not affect health until their first successful heartbeat
+commissions them.
+
+## Canary failure
+
+1. Use only the reported capture and observation IDs.
+2. Check recognition state before checking visit projection.
+3. Confirm synthetic observations created no security alert.
+4. Fix the failing stage, deploy again, and let the canary close its synthetic
+   entry with a matching exit.
+5. Never bypass the canary for a production promotion.
 
 ## Rollback
 

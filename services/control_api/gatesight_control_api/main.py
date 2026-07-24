@@ -24,6 +24,7 @@ from gatesight_control_api.api_models import (
     CaptureComplete,
     CaptureCreate,
     CaptureCreated,
+    CaptureUploadsRefreshed,
     FacilityCreate,
     HeartbeatRequest,
     IdempotencyKey,
@@ -228,6 +229,7 @@ def create_station(
         "recordId": new_id("sta"),
         "facilityId": facility_id,
         **body.model_dump(mode="json"),
+        "commissioned": False,
         "createdAt": now().isoformat(),
     }
     store.put("stations", item, "attribute_not_exists(recordId)")
@@ -247,8 +249,14 @@ def station_heartbeat(
         "stations",
         user.tenant_id,
         station_id,
-        "SET lastHeartbeatAt=:at, armed=:armed, cameraDeviceHash=:camera",
-        {":at": now().isoformat(), ":armed": body.armed, ":camera": body.camera_device_hash or ""},
+        "SET lastHeartbeatAt=:at, armed=:armed, cameraDeviceHash=:camera, "
+        "commissioned=:commissioned, commissionedAt=if_not_exists(commissionedAt,:at)",
+        {
+            ":at": now().isoformat(),
+            ":armed": body.armed,
+            ":camera": body.camera_device_hash or "",
+            ":commissioned": True,
+        },
     )
     return {"stationId": station_id, "lastHeartbeatAt": updated["lastHeartbeatAt"]}
 
@@ -262,6 +270,8 @@ def create_capture(
     idempotency_key: Annotated[IdempotencyKey, Header(alias="Idempotency-Key")],
 ) -> CaptureCreated:
     authorize_facility(user, body.facility_id)
+    if body.synthetic and "ADMIN" not in user.groups:
+        raise HTTPException(status_code=403, detail="synthetic captures require ADMIN")
     existing = _idempotency_existing(store, user.tenant_id, "create-capture", idempotency_key)
     if existing:
         return CaptureCreated.model_validate(existing["result"])
@@ -290,6 +300,8 @@ def create_capture(
         "estimatedCapturedAtServer": estimated.isoformat(),
         "receivedAtServer": received.isoformat(),
         "correlationId": correlation,
+        "guideRegion": body.guide_region.model_dump(mode="json") if body.guide_region else None,
+        "synthetic": body.synthetic,
         "createdAt": received.isoformat(),
         "facilityStatus": f"{body.facility_id}#{CaptureStatus.UPLOADING}",
     }
@@ -323,6 +335,42 @@ def create_capture(
     )
     metrics.add_metric(name="CapturesCreated", unit=MetricUnit.Count, value=1)
     return result
+
+
+@app.post(
+    "/v1/captures/{capture_id}/refresh-uploads",
+    response_model=CaptureUploadsRefreshed,
+)
+def refresh_capture_uploads(
+    capture_id: str,
+    user: Annotated[Any, Depends(require_roles("OPERATOR"))],
+    store: Store,
+) -> CaptureUploadsRefreshed:
+    capture = _get_or_404(store, "captures", user.tenant_id, capture_id)
+    authorize_facility(user, capture["facilityId"])
+    if capture["status"] != CaptureStatus.UPLOADING:
+        raise HTTPException(status_code=409, detail="capture is no longer accepting uploads")
+    uploads = []
+    for index, key in enumerate(capture["frameKeys"]):
+        if store.frame_is_verified(key, capture_id):
+            continue
+        post = store.create_presigned_post(key, capture_id)
+        uploads.append(
+            PresignedFrame(
+                frame_index=index,
+                key=key,
+                url=post["url"],
+                fields=post["fields"],
+                expires_in=settings.presigned_expiration_seconds,
+            )
+        )
+    metrics.add_metric(name="CaptureUploadRefreshes", unit=MetricUnit.Count, value=1)
+    metrics.add_metric(name="CaptureFramesReissued", unit=MetricUnit.Count, value=len(uploads))
+    return CaptureUploadsRefreshed(
+        capture_id=capture_id,
+        status="UPLOADING",
+        uploads=uploads,
+    )
 
 
 @app.post("/v1/captures/{capture_id}/complete")
@@ -384,6 +432,8 @@ def complete_capture(
         "estimated_captured_at_server": capture["estimatedCapturedAtServer"],
         "received_at_server": capture["receivedAtServer"],
         "facility_timezone": capture["facilityTimezone"],
+        "guide_region": capture.get("guideRegion"),
+        "synthetic": bool(capture.get("synthetic", False)),
     }
     message_id = store.enqueue(job)
     result = {"captureId": capture_id, "status": updated["status"], "messageId": message_id}
@@ -427,6 +477,8 @@ def retry_capture(
         "estimated_captured_at_server": capture["estimatedCapturedAtServer"],
         "received_at_server": capture["receivedAtServer"],
         "facility_timezone": capture["facilityTimezone"],
+        "guide_region": capture.get("guideRegion"),
+        "synthetic": bool(capture.get("synthetic", False)),
     }
     message_id = store.enqueue(job)
     store.update(
@@ -564,7 +616,12 @@ def delete_observation_media(
     item = _get_or_404(store, "observations", user.tenant_id, observation_id)
     authorize_facility(user, item["facilityId"])
     capture = _get_or_404(store, "captures", user.tenant_id, item["captureId"])
-    store.delete_media(capture.get("frameKeys", []))
+    store.delete_media(
+        [
+            *capture.get("frameKeys", []),
+            *item.get("derivedCropKeys", []),
+        ]
+    )
     deleted_at = now().isoformat()
     store.update(
         "observations",
@@ -819,7 +876,16 @@ def system_health(
         )
     except ClientError:
         logger.exception("station heartbeat health check failed")
-        stations = {"status": "unknown", "stations": []}
+        stations = {
+            "status": "unknown",
+            "configured": 0,
+            "uncommissioned": 0,
+            "total": 0,
+            "healthy": 0,
+            "stale": 0,
+            "staleAfterSeconds": settings.stale_heartbeat_seconds,
+            "stations": [],
+        }
         unavailable = True
 
     worker_healthy = (

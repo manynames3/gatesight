@@ -8,7 +8,7 @@ GateSight has one time-sensitive job: capture the vehicle while it is in positio
 
 Everything after capture is durable and retryable:
 
-1. The browser uploads a four-frame burst.
+1. The browser captures five candidates and uploads the strongest four.
 2. The control API verifies the upload and queues one recognition job.
 3. The worker saves the observation and event intent atomically.
 4. Independent consumers project visits and evaluate security policy.
@@ -55,6 +55,11 @@ CREATED → UPLOADING → QUEUED → PROCESSING
 ```
 
 The worker uses `NEEDS_REVIEW` when the detector returns no candidates rather than asserting that no plate was present. `NO_PLATE` remains in the versioned contract only for backward compatibility with existing records.
+
+The capture job carries normalized guide coordinates. The worker searches a
+padded guide crop first, then the full frame. Only unanimous, exceptionally
+strong four-frame OCR evidence can recover a plate when both detector passes
+miss.
 
 The worker uses a deterministic observation/outbox ID derived from the capture ID. A duplicate delivery either claims `QUEUED → PROCESSING`, sees the committed observation, or fails for retry; it cannot create another observation.
 
