@@ -14,7 +14,7 @@ interface AuthValue {
   user: User | null;
   ready: boolean;
   configured: boolean;
-  getAccessToken: (forceRefresh?: boolean) => Promise<string | undefined>;
+  getApiToken: (forceRefresh?: boolean) => Promise<string | undefined>;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -66,7 +66,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }
   }, [manager]);
 
-  const getAccessToken = useCallback(
+  const getApiToken = useCallback(
     async (forceRefresh = false) => {
       if (!manager) return undefined;
       let current = await manager.getUser(false);
@@ -76,9 +76,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
       }
       if (!current || current.expired) return undefined;
       setUser((existing) =>
-        existing?.access_token === current.access_token ? existing : current,
+        existing?.id_token === current.id_token ? existing : current,
       );
-      return current.access_token;
+      // Cognito custom tenant/facility attributes are verified ID-token claims.
+      return current.id_token;
     },
     [manager, renewSession],
   );
@@ -138,7 +139,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         user,
         ready,
         configured: manager !== null,
-        getAccessToken,
+        getApiToken,
         signIn,
         signOut,
       }}

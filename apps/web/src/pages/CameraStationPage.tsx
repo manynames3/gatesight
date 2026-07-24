@@ -28,10 +28,10 @@ async function cameraHash(deviceId: string): Promise<string | null> {
 }
 
 export function CameraStationPage() {
-  const { getAccessToken } = useAuth();
+  const { getApiToken } = useAuth();
   const api = useMemo(
-    () => new ApiClient(import.meta.env.VITE_API_ORIGIN, getAccessToken),
-    [getAccessToken],
+    () => new ApiClient(import.meta.env.VITE_API_ORIGIN, getApiToken),
+    [getApiToken],
   );
   const captureCanvasRef = useRef<HTMLCanvasElement>(null);
   const motionCanvasRef = useRef<HTMLCanvasElement>(null);
