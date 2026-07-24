@@ -1,23 +1,36 @@
 # Architecture
 
+Use this guide when you need to understand where data moves, which component owns each decision, or why the system behaves asynchronously.
+
+## At a glance
+
+GateSight has one time-sensitive job: capture the vehicle while it is in position.
+
+Everything after capture is durable and retryable:
+
+1. The browser uploads a four-frame burst.
+2. The control API verifies the upload and queues one recognition job.
+3. The worker saves the observation and event intent atomically.
+4. Independent consumers project visits and evaluate security policy.
+
 ## Design objective
 
-GateSight separates the time-critical act of photographing a vehicle from CPU-heavy recognition. The browser captures first, the control plane issues capability-limited upload instructions, SQS controls work, and versioned domain events fan out only after observation persistence.
+Separate the time-critical act of photographing a vehicle from CPU-heavy recognition. The browser captures first, SQS controls the work, and versioned domain events fan out only after the observation is safely stored.
 
 ## Trust boundaries
 
-1. **Public browser / Cloudflare Pages** — untrusted client input. OAuth state and tokens use session storage; media stays in process memory.
+1. **Browser / Cloudflare Pages** — untrusted client input. OAuth state and tokens use session storage; media stays in process memory.
 2. **Cognito and API Gateway** — Hosted UI identity, PKCE, JWT signature/audience/issuer validation.
 3. **Control API** — role, tenant, facility, state, payload, idempotency, and object-key enforcement.
 4. **Private data plane** — S3, SQS, DynamoDB, KMS, EventBridge, and Lambda under service-specific roles.
 5. **Operations** — GitHub OIDC deployment roles, CloudWatch, security notification topic, and human review.
 
-Client identifiers are never authorization evidence. The backend derives tenant membership from verified claims and verifies each facility/object relationship.
+The rule is simple: never trust a client-supplied identifier as authorization evidence. The backend derives tenant membership from verified claims and checks every facility/object relationship.
 
 ## Components
 
 | Component | Responsibility | Scaling/failure boundary |
-|---|---|---|
+| --- | --- | --- |
 | React station | Camera lifecycle, burst, memory-only queue, direct upload, polling | Browser/tab/device |
 | Control API | Sessions, presign, completion, status, domain/admin APIs | ZIP Lambda |
 | S3 | Encrypted capture and derived evidence retention | Regional service |

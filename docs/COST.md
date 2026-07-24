@@ -1,6 +1,11 @@
 # Cost assumptions
 
-GateSight avoids always-running services. The following is an illustrative planning model, not a quote:
+Use these figures for planning, not approval. Measure real frame size,
+recognition duration, request volume, and retention before setting a production
+budget.
+
+GateSight avoids always-running services. The following is an illustrative
+planning model, not a quote:
 
 - 30,000 capture bursts/month, four 1.5 MB frames each: ~180 GB uploaded before lifecycle expiry.
 - 30,000 recognition invocations at 4 GB and 8 seconds average: ~960,000 GB-seconds.

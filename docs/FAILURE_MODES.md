@@ -1,9 +1,13 @@
 # Failure-mode matrix
 
+Find the symptom, confirm the expected behavior, and use the recovery column as
+your next action. When evidence is missing, GateSight fails closed: it creates
+no security classification.
+
 | Failure | Detection | Behavior | Recovery |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Camera permission denied | `NotAllowedError` | No stream; clear UI fault | Browser/site permission |
-| No camera | `NotFoundError`, empty devices | Station cannot arm | Attach/select camera |
+| No camera | `NotFoundError`, empty devices | Station stays in waiting state | Attach/select camera |
 | Camera disconnected | track `ended`, `devicechange` | Mark disconnected; stop auto assumptions | Reconnect and re-enable |
 | Low-resolution camera | ideal constraint falls back | Capture continues; quality may review | Physical alignment/test |
 | Browser/OS suspends tab | heartbeat stale | Capture unavailable | Operator/kiosk supervision |

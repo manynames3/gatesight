@@ -1,5 +1,8 @@
 # Security and threat model
 
+Start with the core rule: uncertain recognition can create review work, but it
+can never create an unregistered-vehicle claim.
+
 ## Assets
 
 Vehicle images, plate readings/candidates, registration authorization, visits/alerts, tenant/facility membership, Cognito tokens, KMS keys, deployment roles, and audit evidence.
@@ -7,7 +10,7 @@ Vehicle images, plate readings/candidates, registration authorization, visits/al
 ## Threats and controls
 
 | Threat | Control |
-|---|---|
+| --- | --- |
 | Public media exposure | Private bucket, Block Public Access, ownership enforcement, TLS-only, no public URLs |
 | Upload to arbitrary key/type/size | Server key, exact-key POST condition, JPEG MIME, byte limit, capture metadata, short expiry |
 | Cross-tenant object access | Gateway JWT + backend tenant/facility check on every operation |

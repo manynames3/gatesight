@@ -6,7 +6,13 @@ One frame may be blurred, glared, angled, obstructed, or misread. Treating a sin
 
 ## Decision
 
-Capture 3–5 frames; prefer exact agreement across at least two good frames; weight detector/OCR/character/quality evidence; penalize conflict; preserve every candidate; route ambiguity to review.
+Capture four frames. Require compatible evidence across at least two usable
+frames, weight detector/OCR/character/quality evidence, penalize conflict, and
+preserve every candidate.
+
+Strong unanimous agreement across all four frames may override a conservative
+aggregate threshold. Conflicting or incomplete evidence always routes to
+review.
 
 ## Alternatives considered
 
@@ -14,7 +20,9 @@ Best-single-frame selection is simpler but fragile. Majority vote ignores confid
 
 ## Consequences
 
-More S3/inference work buys review evidence and robustness. Thresholds require labeled calibration and remain SSM configuration.
+More S3 and inference work buys review evidence and robustness. Thresholds
+require labeled calibration and remain SSM configuration. The unanimous
+override must remain narrow and covered by regression tests.
 
 ## Revisit when
 

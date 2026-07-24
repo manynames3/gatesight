@@ -1,5 +1,8 @@
 # Data model and access patterns
 
+Use this guide when changing a table, index, query, transaction, or retention
+rule. Start with the access pattern—not the table.
+
 ## Review outcome
 
 Separate tables keep authorization, retention, streams, and operational ownership explicit. A single-table design would reduce table count but would make mixed retention and the protected outbox stream harder to review without materially improving the current access patterns.
@@ -9,7 +12,7 @@ All tables use on-demand capacity, KMS encryption, `tenantId` as partition key, 
 ## Access-pattern table
 
 | Access pattern | Table / key or index | API/consumer |
-|---|---|---|
+| --- | --- | --- |
 | Capture by ID | `captures (tenantId, recordId)` | poll, complete, retry, worker |
 | Captures by facility/status/time | `byFacilityStatus (facilityStatus, createdAt)` | operations |
 | Observations by facility/time | `byFacilityTime (facilityId, capturedAt)` | observations |
