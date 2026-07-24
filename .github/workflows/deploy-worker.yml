@@ -33,7 +33,7 @@ jobs:
       ECR_REPOSITORY_URL: ${{ vars.WORKER_ECR_REPOSITORY_URL }}
       LAMBDA_FUNCTION_NAME: gatesight-${{ inputs.environment || 'dev' }}-recognition-worker
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.8.13"

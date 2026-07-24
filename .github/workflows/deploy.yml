@@ -38,7 +38,7 @@ jobs:
             echo "::error::ECR_REPOSITORY_URL is not configured for the $ENVIRONMENT environment."
             exit 1
           }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v6
         with: { version: "0.8.13", enable-cache: true }
       - uses: actions/setup-node@v4
