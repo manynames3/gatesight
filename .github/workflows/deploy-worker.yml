@@ -1,6 +1,8 @@
 name: deploy-recognition-worker
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       environment:
@@ -19,17 +21,17 @@ permissions:
   id-token: write
 
 concurrency:
-  group: gatesight-recognition-${{ inputs.environment }}
+  group: gatesight-recognition-${{ inputs.environment || 'dev' }}
   cancel-in-progress: false
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    environment: ${{ inputs.environment || 'dev' }}
     env:
       AWS_REGION: ${{ vars.WORKER_AWS_REGION || 'us-east-1' }}
       ECR_REPOSITORY_URL: ${{ vars.WORKER_ECR_REPOSITORY_URL }}
-      LAMBDA_FUNCTION_NAME: gatesight-${{ inputs.environment }}-recognition-worker
+      LAMBDA_FUNCTION_NAME: gatesight-${{ inputs.environment || 'dev' }}-recognition-worker
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -142,12 +144,12 @@ jobs:
             --function-name "$LAMBDA_FUNCTION_NAME" \
             --query 'Code.ResolvedImageUri' \
             --output text
-      - name: Deploy control API and secure-setting event consumers
+      - name: Deploy control API and event consumers
         run: |
-          for service in control-api outbox-publisher visit-projector security-evaluator; do
+          for service in control-api outbox-publisher visit-projector security-evaluator heartbeat-monitor; do
             aws lambda update-function-code \
-              --function-name "gatesight-${{ inputs.environment }}-$service" \
+              --function-name "gatesight-${{ inputs.environment || 'dev' }}-$service" \
               --zip-file "fileb://build/lambda/$service.zip"
             aws lambda wait function-updated-v2 \
-              --function-name "gatesight-${{ inputs.environment }}-$service"
+              --function-name "gatesight-${{ inputs.environment || 'dev' }}-$service"
           done
