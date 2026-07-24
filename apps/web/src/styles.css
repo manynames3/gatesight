@@ -44,7 +44,7 @@ button { cursor: pointer; }
 .camera-panel { background: #080c0b; border: 1px solid var(--line); box-shadow: 0 28px 70px #0006; }
 .camera-viewport { position: relative; min-height: 430px; aspect-ratio: 16/10; overflow: hidden; background: linear-gradient(145deg, #18211f, #070a09); }
 .camera-viewport video { width: 100%; height: 100%; display: block; object-fit: cover; }
-.plate-region { position: absolute; left: 18%; top: 52%; width: 64%; height: 25%; border: 2px solid var(--lime); box-shadow: 0 0 0 9999px #0005; }
+.plate-region { position: absolute; left: 50%; top: 52%; width: 34%; aspect-ratio: 2 / 1; transform: translateX(-50%); border: 2px solid var(--lime); box-shadow: 0 0 0 9999px #0005; }
 .plate-region::before, .plate-region::after { content: ""; position: absolute; width: 32px; height: 10px; border-top: 3px solid white; top: -3px; }
 .plate-region::before { left: -3px; border-left: 3px solid white; }.plate-region::after { right: -3px; border-right: 3px solid white; }
 .plate-region span { position: absolute; bottom: -26px; left: 50%; transform: translateX(-50%); color: white; font: 500 10px ui-monospace, monospace; white-space: nowrap; }

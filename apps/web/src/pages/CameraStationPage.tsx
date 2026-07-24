@@ -14,12 +14,12 @@ import {
   assessLivePlate,
   burstResemblesPlate,
 } from "../camera/plateGate";
+import { guideRegion } from "../camera/region";
 import type { PendingBurst } from "../camera/types";
 import { uploadFrame } from "../camera/upload";
 import { StatusChip } from "../components/StatusChip";
 import { useCamera } from "../hooks/useCamera";
 
-const region = { x: 0.18, y: 0.52, width: 0.64, height: 0.25 };
 const terminalNeedsReview = new Set(["NEEDS_REVIEW", "MULTIPLE_PLATES"]);
 
 function captureKey(prefix: string, burstId: string) {
@@ -40,6 +40,7 @@ export function CameraStationPage() {
   );
   const captureCanvasRef = useRef<HTMLCanvasElement>(null);
   const motionCanvasRef = useRef<HTMLCanvasElement>(null);
+  const plateGuideRef = useRef<HTMLDivElement>(null);
   const uploadAbortRef = useRef<AbortController | null>(null);
   const pollAbortRef = useRef<AbortController | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -81,6 +82,11 @@ export function CameraStationPage() {
   const facility = facilities.find((item) => item.recordId === facilityId);
   const armed =
     cameraPermission === "granted" && Boolean(facility && station);
+
+  const currentPlateRegion = useCallback(() => {
+    if (!videoRef.current || !plateGuideRef.current) return null;
+    return guideRegion(videoRef.current, plateGuideRef.current);
+  }, [videoRef]);
 
   useEffect(() => {
     let active = true;
@@ -306,6 +312,11 @@ export function CameraStationPage() {
     setCaptureResult(null);
     let burst: PendingBurst | null = null;
     try {
+      const region = currentPlateRegion();
+      if (!region) {
+        setMessage("The camera is still preparing the plate guide. Try again in a moment.");
+        return;
+      }
       const liveAssessment = assessLivePlate(
         videoRef.current,
         captureCanvasRef.current,
@@ -356,7 +367,17 @@ export function CameraStationPage() {
       uploadAbortRef.current = null;
       setBusy(false);
     }
-  }, [api, busy, facility, online, processBurst, station, streamRef, videoRef]);
+  }, [
+    api,
+    busy,
+    currentPlateRegion,
+    facility,
+    online,
+    processBurst,
+    station,
+    streamRef,
+    videoRef,
+  ]);
 
   const retryPending = useCallback(async () => {
     if (!pending || busy || !online) return;
@@ -391,6 +412,11 @@ export function CameraStationPage() {
         !busy
       ) {
         lastSample = timestamp;
+        const region = currentPlateRegion();
+        if (!region) {
+          frame = requestAnimationFrame(loop);
+          return;
+        }
         const sample = detectorRef.current.sample(
           videoRef.current,
           motionCanvasRef.current,
@@ -415,7 +441,7 @@ export function CameraStationPage() {
     };
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
-  }, [armed, busy, captureNow, videoRef]);
+  }, [armed, busy, captureNow, currentPlateRegion, videoRef]);
 
   const discard = () => {
     uploadAbortRef.current?.abort();
@@ -469,7 +495,7 @@ export function CameraStationPage() {
         <div className="camera-panel">
           <div className="camera-viewport">
             <video ref={videoRef} muted playsInline aria-label="Live gate camera" />
-            <div className="plate-region" aria-hidden="true">
+            <div ref={plateGuideRef} className="plate-region" aria-hidden="true">
               <span>ALIGN PLATE</span>
             </div>
             <div className="camera-overlay">
