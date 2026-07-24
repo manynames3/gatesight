@@ -28,7 +28,11 @@ def _dynamodb_compatible(value: Any) -> Any:
 
 
 def serialize(item: dict[str, Any]) -> dict[str, Any]:
-    return {key: _serializer.serialize(_dynamodb_compatible(value)) for key, value in item.items()}
+    return {
+        key: _serializer.serialize(_dynamodb_compatible(value))
+        for key, value in item.items()
+        if value is not None
+    }
 
 
 class RecognitionRepository:

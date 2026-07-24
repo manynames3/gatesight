@@ -40,3 +40,9 @@ def test_serialize_converts_nested_floats_to_dynamodb_numbers() -> None:
 def test_serialize_rejects_nonfinite_numbers() -> None:
     with pytest.raises(ValueError, match="must be finite"):
         serialize({"confidence": float("nan")})
+
+
+def test_serialize_omits_null_sparse_index_keys() -> None:
+    assert serialize({"tenantId": "tenant_portfolio", "normalizedPlate": None}) == {
+        "tenantId": {"S": "tenant_portfolio"}
+    }
