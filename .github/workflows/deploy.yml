@@ -21,13 +21,25 @@ concurrency:
 
 jobs:
   deploy:
-    if: ${{ vars.AWS_DEPLOY_ROLE_ARN != '' && vars.ECR_REPOSITORY_URL != '' }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment || 'dev' }}
     env:
       ENVIRONMENT: ${{ inputs.environment || 'dev' }}
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
     steps:
+      - name: Verify deployment configuration
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          ECR_REPOSITORY_URL: ${{ vars.ECR_REPOSITORY_URL }}
+        run: |
+          test -n "$AWS_DEPLOY_ROLE_ARN" || {
+            echo "::error::AWS_DEPLOY_ROLE_ARN is not configured for the $ENVIRONMENT environment."
+            exit 1
+          }
+          test -n "$ECR_REPOSITORY_URL" || {
+            echo "::error::ECR_REPOSITORY_URL is not configured for the $ENVIRONMENT environment."
+            exit 1
+          }
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with: { version: "0.8.13", enable-cache: true }
