@@ -63,12 +63,20 @@ data "aws_iam_policy_document" "control_api" {
     resources = [aws_s3_bucket.captures.arn]
   }
   statement {
-    actions   = ["sqs:SendMessage"]
+    actions   = ["sqs:SendMessage", "sqs:GetQueueAttributes"]
     resources = [aws_sqs_queue.recognition.arn]
   }
   statement {
     actions   = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
     resources = [aws_sqs_queue.recognition_dlq.arn]
+  }
+  statement {
+    actions   = ["dynamodb:Query"]
+    resources = [aws_dynamodb_table.outbox.arn]
+  }
+  statement {
+    actions   = ["lambda:GetFunctionConfiguration"]
+    resources = ["arn:${data.aws_partition.current.partition}:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${local.prefix}-recognition-worker"]
   }
   statement {
     actions   = ["kms:Decrypt", "kms:Encrypt", "kms:GenerateDataKey"]
@@ -208,18 +216,20 @@ resource "aws_lambda_function" "control_api" {
   tracing_config { mode = "Active" }
   environment {
     variables = {
-      GATESIGHT_ENVIRONMENT                  = var.environment
-      GATESIGHT_AWS_REGION                   = var.aws_region
-      GATESIGHT_CAPTURE_BUCKET               = aws_s3_bucket.captures.id
-      GATESIGHT_RECOGNITION_QUEUE_URL        = aws_sqs_queue.recognition.id
-      GATESIGHT_DLQ_URL                      = aws_sqs_queue.recognition_dlq.id
-      GATESIGHT_TABLE_PREFIX                 = local.prefix
-      GATESIGHT_ALLOWED_ORIGINS              = join(",", var.web_origins)
-      GATESIGHT_DASHBOARD_URL                = var.dashboard_url
-      GATESIGHT_PRESIGNED_EXPIRATION_SECONDS = "180"
-      POWERTOOLS_SERVICE_NAME                = "control-api"
-      POWERTOOLS_METRICS_NAMESPACE           = "GateSight"
-      LOG_LEVEL                              = "INFO"
+      GATESIGHT_ENVIRONMENT                      = var.environment
+      GATESIGHT_AWS_REGION                       = var.aws_region
+      GATESIGHT_CAPTURE_BUCKET                   = aws_s3_bucket.captures.id
+      GATESIGHT_RECOGNITION_QUEUE_URL            = aws_sqs_queue.recognition.id
+      GATESIGHT_RECOGNITION_WORKER_FUNCTION_NAME = aws_lambda_function.recognition.function_name
+      GATESIGHT_DLQ_URL                          = aws_sqs_queue.recognition_dlq.id
+      GATESIGHT_TABLE_PREFIX                     = local.prefix
+      GATESIGHT_STALE_HEARTBEAT_SECONDS          = "180"
+      GATESIGHT_ALLOWED_ORIGINS                  = join(",", var.web_origins)
+      GATESIGHT_DASHBOARD_URL                    = var.dashboard_url
+      GATESIGHT_PRESIGNED_EXPIRATION_SECONDS     = "180"
+      POWERTOOLS_SERVICE_NAME                    = "control-api"
+      POWERTOOLS_METRICS_NAMESPACE               = "GateSight"
+      LOG_LEVEL                                  = "INFO"
     }
   }
   depends_on = [aws_cloudwatch_log_group.lambda, aws_iam_role_policy.service]

@@ -6,6 +6,67 @@ import type {
   Station,
 } from "./generated";
 
+export type OperationalStatus = "healthy" | "attention" | "critical" | "unknown";
+
+export interface SystemHealth {
+  status: OperationalStatus;
+  service: string;
+  environment: string;
+  checkedAt: string;
+  tenantId: string;
+  components: {
+    controlApi: {
+      status: OperationalStatus;
+      detail: string;
+    };
+    recognitionWorker: {
+      status: OperationalStatus;
+      functionName?: string;
+      state: string;
+      lastUpdateStatus: string;
+      lastModified?: string;
+      memoryMb?: number;
+      timeoutSeconds?: number;
+    };
+    recognitionQueue: {
+      status: OperationalStatus;
+      configured: boolean;
+      visible: number;
+      inFlight: number;
+      delayed: number;
+    };
+    outbox: {
+      status: OperationalStatus;
+      pending: number;
+      published: number;
+      failed: number;
+      total: number;
+      oldestPendingAt: string | null;
+    };
+    stations: {
+      status: OperationalStatus;
+      total: number;
+      healthy: number;
+      stale: number;
+      staleAfterSeconds: number;
+      stations: Array<{
+        stationId: string;
+        facilityId: string;
+        name: string;
+        lastHeartbeatAt: string | null;
+        status: "healthy" | "stale";
+      }>;
+    };
+    deadLetterQueue: {
+      status: OperationalStatus;
+      configured: boolean;
+      visible: number;
+      inFlight: number;
+      delayed: number;
+    };
+  };
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -71,6 +132,10 @@ export class ApiClient {
 
   getServerTime(): Promise<{ serverTime: string; unixTimeMs: number }> {
     return this.request("/v1/time");
+  }
+
+  getSystemHealth(): Promise<SystemHealth> {
+    return this.request("/v1/system/health");
   }
 
   getFacilities(): Promise<Page<Facility>> {

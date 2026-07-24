@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     table_prefix: str = "gatesight-local"
     media_url_expiration_seconds: int = Field(default=120, ge=30, le=600)
     dlq_url: str = ""
+    recognition_worker_function_name: str = ""
+    stale_heartbeat_seconds: int = Field(default=180, ge=30, le=3600)
     dashboard_url: str = "http://localhost:5173"
 
 

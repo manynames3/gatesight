@@ -773,13 +773,115 @@ def resolve_alert(
 @app.get("/v1/system/health")
 def system_health(
     user: Annotated[Any, Depends(require_roles("ADMIN"))],
+    store: Store,
 ) -> dict[str, Any]:
+    checked_at = now()
+    unavailable = False
+
+    try:
+        recognition_queue = store.queue_summary(settings.recognition_queue_url)
+    except ClientError:
+        logger.exception("recognition queue health check failed")
+        recognition_queue = {"configured": True, "status": "unknown"}
+        unavailable = True
+
+    try:
+        dead_letter_queue = store.queue_summary(settings.dlq_url)
+    except ClientError:
+        logger.exception("dead-letter queue health check failed")
+        dead_letter_queue = {"configured": True, "status": "unknown"}
+        unavailable = True
+
+    try:
+        worker = store.worker_summary()
+    except ClientError:
+        logger.exception("recognition worker health check failed")
+        worker = {"state": "Unknown", "lastUpdateStatus": "Unknown"}
+        unavailable = True
+
+    try:
+        outbox = store.outbox_summary(user.tenant_id)
+    except ClientError:
+        logger.exception("outbox health check failed")
+        outbox = {"status": "unknown"}
+        unavailable = True
+
+    try:
+        stations = store.station_heartbeat_summary(
+            user.tenant_id,
+            checked_at,
+            settings.stale_heartbeat_seconds,
+        )
+    except ClientError:
+        logger.exception("station heartbeat health check failed")
+        stations = {"status": "unknown", "stations": []}
+        unavailable = True
+
+    worker_healthy = (
+        worker.get("state") == "Active" and worker.get("lastUpdateStatus") == "Successful"
+    )
+    critical = (
+        int(dead_letter_queue.get("visible", 0)) > 0
+        or int(outbox.get("failed", 0)) > 0
+        or (worker.get("state") not in {"Active", "Unknown"})
+        or (worker.get("lastUpdateStatus") not in {"Successful", "Unknown"})
+    )
+    attention = (
+        unavailable
+        or not worker_healthy
+        or int(recognition_queue.get("visible", 0)) > 0
+        or int(recognition_queue.get("delayed", 0)) > 0
+        or int(outbox.get("pending", 0)) > 0
+        or int(stations.get("stale", 0)) > 0
+    )
+    overall_status = "critical" if critical else "attention" if attention else "healthy"
+
+    recognition_queue["status"] = (
+        "attention"
+        if int(recognition_queue.get("visible", 0)) > 0
+        or int(recognition_queue.get("delayed", 0)) > 0
+        else recognition_queue.get("status", "healthy")
+    )
+    dead_letter_queue["status"] = (
+        "critical"
+        if int(dead_letter_queue.get("visible", 0)) > 0
+        else dead_letter_queue.get("status", "healthy")
+    )
+    worker["status"] = (
+        "healthy"
+        if worker_healthy
+        else "unknown"
+        if worker.get("state") == "Unknown"
+        else "critical"
+    )
+    outbox["status"] = (
+        "critical"
+        if int(outbox.get("failed", 0)) > 0
+        else "attention"
+        if int(outbox.get("pending", 0)) > 0
+        else outbox.get("status", "healthy")
+    )
+    stations["status"] = (
+        "attention" if int(stations.get("stale", 0)) > 0 else stations.get("status", "healthy")
+    )
+
     return {
-        "status": "ok",
+        "status": overall_status,
         "service": "control-api",
         "environment": settings.environment,
-        "time": now().isoformat(),
+        "checkedAt": checked_at.isoformat(),
         "tenantId": user.tenant_id,
+        "components": {
+            "controlApi": {
+                "status": "healthy",
+                "detail": "Authenticated health request succeeded",
+            },
+            "recognitionWorker": worker,
+            "recognitionQueue": recognition_queue,
+            "outbox": outbox,
+            "stations": stations,
+            "deadLetterQueue": dead_letter_queue,
+        },
     }
 
 

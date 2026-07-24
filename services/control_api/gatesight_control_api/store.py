@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -60,6 +60,7 @@ class AwsStore:
             ),
         )
         self.sqs = session.client("sqs")
+        self.lambda_client = session.client("lambda")
 
     def table(self, name: str) -> Any:
         return self.dynamodb.Table(f"{settings.table_prefix}-{name}")
@@ -208,6 +209,143 @@ class AwsStore:
             }
             for message in messages
         ]
+
+    def queue_summary(self, queue_url: str) -> dict[str, int | bool]:
+        if not queue_url:
+            return {
+                "configured": False,
+                "visible": 0,
+                "inFlight": 0,
+                "delayed": 0,
+            }
+        response = self.sqs.get_queue_attributes(
+            QueueUrl=queue_url,
+            AttributeNames=[
+                "ApproximateNumberOfMessages",
+                "ApproximateNumberOfMessagesNotVisible",
+                "ApproximateNumberOfMessagesDelayed",
+            ],
+        )
+        attributes = response.get("Attributes", {})
+        return {
+            "configured": True,
+            "visible": int(attributes.get("ApproximateNumberOfMessages", "0")),
+            "inFlight": int(attributes.get("ApproximateNumberOfMessagesNotVisible", "0")),
+            "delayed": int(attributes.get("ApproximateNumberOfMessagesDelayed", "0")),
+        }
+
+    def worker_summary(self) -> dict[str, Any]:
+        function_name = (
+            settings.recognition_worker_function_name
+            or f"{settings.table_prefix}-recognition-worker"
+        )
+        response = self.lambda_client.get_function_configuration(FunctionName=function_name)
+        return {
+            "functionName": function_name,
+            "state": response.get("State", "Unknown"),
+            "lastUpdateStatus": response.get("LastUpdateStatus", "Unknown"),
+            "lastModified": response.get("LastModified"),
+            "memoryMb": response.get("MemorySize"),
+            "timeoutSeconds": response.get("Timeout"),
+        }
+
+    def _tenant_projection(
+        self,
+        table: str,
+        tenant_id: str,
+        projection: str,
+        names: dict[str, str] | None = None,
+    ) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        exclusive_start_key: dict[str, Any] | None = None
+        while True:
+            arguments: dict[str, Any] = {
+                "KeyConditionExpression": Key("tenantId").eq(tenant_id),
+                "ProjectionExpression": projection,
+            }
+            if names:
+                arguments["ExpressionAttributeNames"] = names
+            if exclusive_start_key:
+                arguments["ExclusiveStartKey"] = exclusive_start_key
+            response = self.table(table).query(**arguments)
+            items.extend(response.get("Items", []))
+            exclusive_start_key = response.get("LastEvaluatedKey")
+            if not exclusive_start_key:
+                return items
+
+    def outbox_summary(self, tenant_id: str) -> dict[str, Any]:
+        items = self._tenant_projection(
+            "outbox",
+            tenant_id,
+            "#status, createdAt",
+            {"#status": "status"},
+        )
+        counts: dict[str, int] = {}
+        oldest_pending_at: str | None = None
+        for item in items:
+            item_status = str(item.get("status", "UNKNOWN"))
+            counts[item_status] = counts.get(item_status, 0) + 1
+            if item_status == "PENDING":
+                created_at = item.get("createdAt")
+                if isinstance(created_at, str) and (
+                    oldest_pending_at is None or created_at < oldest_pending_at
+                ):
+                    oldest_pending_at = created_at
+        return {
+            "pending": counts.get("PENDING", 0),
+            "published": counts.get("PUBLISHED", 0),
+            "failed": counts.get("FAILED", 0),
+            "total": len(items),
+            "oldestPendingAt": oldest_pending_at,
+        }
+
+    def station_heartbeat_summary(
+        self,
+        tenant_id: str,
+        checked_at: datetime,
+        stale_after_seconds: int,
+    ) -> dict[str, Any]:
+        items = self._tenant_projection(
+            "stations",
+            tenant_id,
+            "recordId, facilityId, #name, createdAt, lastHeartbeatAt",
+            {"#name": "name"},
+        )
+        cutoff = checked_at - timedelta(seconds=stale_after_seconds)
+        stations = []
+        healthy = 0
+        for item in items:
+            raw_observed = item.get("lastHeartbeatAt") or item.get("createdAt")
+            observed: datetime | None = None
+            if isinstance(raw_observed, str):
+                try:
+                    observed = datetime.fromisoformat(raw_observed)
+                    if observed.tzinfo is None:
+                        observed = observed.replace(tzinfo=UTC)
+                except ValueError:
+                    observed = None
+            station_status = "healthy" if observed and observed >= cutoff else "stale"
+            healthy += int(station_status == "healthy")
+            stations.append(
+                {
+                    "stationId": item.get("recordId"),
+                    "facilityId": item.get("facilityId"),
+                    "name": item.get("name"),
+                    "lastHeartbeatAt": item.get("lastHeartbeatAt"),
+                    "status": station_status,
+                }
+            )
+        stations.sort(
+            key=lambda station: str(station.get("lastHeartbeatAt") or ""),
+            reverse=True,
+        )
+        return {
+            "total": len(stations),
+            "healthy": healthy,
+            "stale": len(stations) - healthy,
+            "staleAfterSeconds": stale_after_seconds,
+            "stations": stations,
+        }
 
     def redrive(self, message_id: str) -> None:
         if not settings.dlq_url:

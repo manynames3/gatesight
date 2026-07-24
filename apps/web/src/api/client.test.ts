@@ -132,4 +132,31 @@ describe("ApiClient authentication", () => {
       "https://api.example.test/v1/observations?facilityId=fac_san_diego",
     );
   });
+
+  it("reads protected system health from the live API", async () => {
+    const token = vi
+      .fn<(forceRefresh?: boolean) => Promise<string | undefined>>()
+      .mockResolvedValue("current-token");
+    const health = {
+      status: "healthy",
+      service: "control-api",
+      environment: "dev",
+      checkedAt: "2026-07-24T03:22:00Z",
+      tenantId: "tenant_portfolio",
+      components: {},
+    };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify(health), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test", token);
+
+    await expect(client.getSystemHealth()).resolves.toEqual(health);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/v1/system/health",
+    );
+  });
 });
