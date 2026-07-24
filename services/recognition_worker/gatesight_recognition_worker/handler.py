@@ -42,7 +42,7 @@ CONFIG_PREFIX = os.getenv("GATESIGHT_CONFIG_PREFIX", "")
 def _configuration(name: str, fallback: str) -> str:
     if not CONFIG_PREFIX:
         return os.getenv(f"GATESIGHT_{name.upper().replace('-', '_')}", fallback)
-    value = get_parameter(f"{CONFIG_PREFIX}/{name}", max_age=300)
+    value = get_parameter(f"{CONFIG_PREFIX}/{name}", max_age=300, decrypt=True)
     return str(value) if value is not None else fallback
 
 
