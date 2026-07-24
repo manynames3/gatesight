@@ -10,6 +10,7 @@ from typing import Any
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from gatesight_control_api.settings import settings
@@ -48,7 +49,16 @@ class AwsStore:
         session = boto3.session.Session(region_name=settings.aws_region)
         self.dynamodb = session.resource("dynamodb")
         self.dynamodb_client = session.client("dynamodb")
-        self.s3 = session.client("s3")
+        self.s3 = session.client(
+            "s3",
+            config=Config(
+                signature_version="s3v4",
+                s3={
+                    "addressing_style": "virtual",
+                    "us_east_1_regional_endpoint": "regional",
+                },
+            ),
+        )
         self.sqs = session.client("sqs")
 
     def table(self, name: str) -> Any:

@@ -58,14 +58,12 @@ export function CameraStationPage() {
   const [stations, setStations] = useState<Station[]>([]);
   const [facilityId, setFacilityId] = useState("");
   const [stationId, setStationId] = useState("");
-  const [privacyAccepted, setPrivacyAccepted] = useState(false);
-  const [armed, setArmed] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
   const [heartbeat, setHeartbeat] = useState<"idle" | "sending" | "healthy" | "stale">("idle");
   const [clockOffsetMs, setClockOffsetMs] = useState(0);
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
   const [motionState, setMotionState] = useState<"idle" | "watching" | "moving" | "stabilizing">(
-    "idle",
+    "watching",
   );
   const [pending, setPending] = useState<PendingBurst | null>(null);
   const [progress, setProgress] = useState<number[]>([]);
@@ -76,6 +74,8 @@ export function CameraStationPage() {
 
   const station = stations.find((item) => item.recordId === stationId);
   const facility = facilities.find((item) => item.recordId === facilityId);
+  const armed =
+    cameraPermission === "granted" && Boolean(facility && station);
 
   useEffect(() => {
     let active = true;
@@ -162,38 +162,39 @@ export function CameraStationPage() {
     }
   }, []);
 
-  const disarm = useCallback(() => {
-    setArmed(false);
-    setMotionState("idle");
-    detectorRef.current.reset();
+  useEffect(() => {
+    const detector = detectorRef.current;
+    detector.reset();
     motionSeenAtRef.current = null;
-    void wakeLockRef.current?.release();
-    wakeLockRef.current = null;
-  }, []);
-
-  const arm = useCallback(async () => {
-    if (!privacyAccepted) {
-      setMessage("Acknowledge the camera and privacy notice before arming.");
+    if (!armed) {
+      void wakeLockRef.current?.release();
+      wakeLockRef.current = null;
       return;
     }
-    if (!facility || !station || cameraPermission !== "granted") {
-      setMessage("Select a facility, station, and working camera before arming.");
-      return;
-    }
-    try {
-      await syncClock();
-      await acquireWakeLock();
-      setMessage(null);
-      setArmed(true);
-      setMotionState("watching");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Station could not be armed");
-    }
-  }, [acquireWakeLock, cameraPermission, facility, privacyAccepted, station, syncClock]);
+    const clockTimer = window.setTimeout(() => {
+      void syncClock().catch((error: unknown) => {
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "Station clock could not be synchronized",
+        );
+      });
+    }, 0);
+    void acquireWakeLock().catch(() => undefined);
+    return () => {
+      window.clearTimeout(clockTimer);
+      detector.reset();
+      motionSeenAtRef.current = null;
+      void wakeLockRef.current?.release();
+      wakeLockRef.current = null;
+    };
+  }, [acquireWakeLock, armed, cameraDeviceId, facilityId, stationId, syncClock]);
 
   useEffect(() => {
     const visible = () => {
-      if (armed && document.visibilityState === "visible") void acquireWakeLock();
+      if (armed && document.visibilityState === "visible") {
+        void acquireWakeLock().catch(() => undefined);
+      }
     };
     document.addEventListener("visibilitychange", visible);
     return () => document.removeEventListener("visibilitychange", visible);
@@ -421,7 +422,9 @@ export function CameraStationPage() {
           <StatusChip tone={heartbeat === "healthy" ? "good" : heartbeat === "stale" ? "danger" : "neutral"}>
             Heartbeat {heartbeat}
           </StatusChip>
-          <StatusChip tone={armed ? "warn" : "neutral"}>{armed ? "Armed" : "Disarmed"}</StatusChip>
+          <StatusChip tone={armed ? "good" : "neutral"}>
+            {armed ? "Automatic" : "Waiting"}
+          </StatusChip>
         </div>
       </header>
 
@@ -442,7 +445,7 @@ export function CameraStationPage() {
             </div>
             <div className="camera-overlay">
               <span>{station?.direction ?? "SELECT DIRECTION"}</span>
-              <span>{motionState.toUpperCase()}</span>
+              <span>{armed ? motionState.toUpperCase() : "IDLE"}</span>
             </div>
           </div>
           <canvas ref={captureCanvasRef} hidden />
@@ -455,7 +458,7 @@ export function CameraStationPage() {
                   id="camera-source"
                   value={cameraDeviceId}
                   onChange={(event) => void selectCamera(event.target.value)}
-                  disabled={armed || cameraPermission === "requesting"}
+                  disabled={busy || pending !== null || cameraPermission === "requesting"}
                 >
                   <option value="">Automatic (rear camera preferred)</option>
                   {cameras.map((device, index) => (
@@ -468,7 +471,7 @@ export function CameraStationPage() {
                   type="button"
                   className="secondary-button"
                   onClick={() => void refreshCameras()}
-                  disabled={armed || cameraPermission === "requesting"}
+                  disabled={busy || pending !== null || cameraPermission === "requesting"}
                 >
                   Refresh
                 </button>
@@ -492,29 +495,20 @@ export function CameraStationPage() {
                     : "Enable camera & find devices"}
                 </button>
               ) : (
-                <>
-                  <button
-                    type="button"
-                    className="capture-button"
-                    disabled={busy || !online || !facility || !station}
-                    onClick={() => void captureNow()}
-                  >
-                    {busy
-                      ? "Capturing / uploading…"
-                      : !online
-                        ? "Waiting for network"
-                        : !facility || !station
-                          ? "Select a station to capture"
-                          : "Capture now"}
-                  </button>
-                  <button
-                    type="button"
-                    className={armed ? "danger-button" : "secondary-button"}
-                    onClick={() => (armed ? disarm() : void arm())}
-                  >
-                    {armed ? "Disarm automatic capture" : "Arm automatic capture"}
-                  </button>
-                </>
+                <button
+                  type="button"
+                  className="capture-button"
+                  disabled={busy || !online || !facility || !station}
+                  onClick={() => void captureNow()}
+                >
+                  {busy
+                    ? "Capturing / uploading…"
+                    : !online
+                      ? "Waiting for network"
+                      : !facility || !station
+                        ? "Select a station to capture"
+                        : "Capture now"}
+                </button>
               )}
             </div>
           </div>
@@ -528,7 +522,7 @@ export function CameraStationPage() {
               <select
                 value={facilityId}
                 onChange={(event) => selectFacility(event.target.value)}
-                disabled={armed || pending !== null}
+                disabled={busy || pending !== null}
               >
                 <option value="">Select facility</option>
                 {facilities.map((item) => <option key={item.recordId} value={item.recordId}>{item.name}</option>)}
@@ -539,7 +533,7 @@ export function CameraStationPage() {
               <select
                 value={stationId}
                 onChange={(event) => setStationId(event.target.value)}
-                disabled={armed || pending !== null}
+                disabled={busy || pending !== null}
               >
                 <option value="">Select station</option>
                 {stations.map((item) => <option key={item.recordId} value={item.recordId}>{item.name} · {item.direction}</option>)}
@@ -566,21 +560,6 @@ export function CameraStationPage() {
                 reduced; use a 1080p source when available.
               </p>
             )}
-          </section>
-
-          <section className="control-card privacy-card">
-            <h2>Privacy & capture</h2>
-            <label className="checkbox-label">
-              <input type="checkbox" checked={privacyAccepted} onChange={(event) => setPrivacyAccepted(event.target.checked)} />
-              <span>
-                I understand this station captures vehicle images and license plates for authorized
-                facility operations. It performs no facial recognition or person identification.
-              </span>
-            </label>
-            <p className="fine-print">
-              Frames remain in memory until upload and are not intentionally written to browser
-              storage. Unuploaded frames are lost if the page, computer, or network fails.
-            </p>
           </section>
 
           {(pending || progress.length > 0) && (
