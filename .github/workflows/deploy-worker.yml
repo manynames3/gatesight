@@ -79,10 +79,25 @@ jobs:
             -f services/recognition_worker/Dockerfile \
             -t "$ECR_REPOSITORY_URL:$GITHUB_SHA" \
             .
+      - name: Verify models are readable by the Lambda runtime user
+        if: steps.existing-image.outputs.exists != 'true'
+        run: |
+          docker run --rm \
+            --user 10001:10001 \
+            --entrypoint /bin/sh \
+            "$ECR_REPOSITORY_URL:$GITHUB_SHA" \
+            -c 'for model in /opt/models/*; do test -r "$model"; done'
       - name: Publish immutable image
         if: steps.existing-image.outputs.exists != 'true'
         run: |
           docker push "$ECR_REPOSITORY_URL:$GITHUB_SHA"
+      - name: Build event consumer packages
+        run: |
+          docker build \
+            --platform linux/arm64 \
+            -f infrastructure/lambda/Dockerfile.zip \
+            --output type=local,dest=build \
+            .
       - name: Resolve and verify immutable image
         env:
           EXISTING_IMAGE_URI: ${{ steps.existing-image.outputs.image_uri }}
@@ -115,3 +130,12 @@ jobs:
             --function-name "$LAMBDA_FUNCTION_NAME" \
             --query 'Code.ResolvedImageUri' \
             --output text
+      - name: Deploy secure-setting event consumers
+        run: |
+          for service in visit-projector security-evaluator; do
+            aws lambda update-function-code \
+              --function-name "gatesight-${{ inputs.environment }}-$service" \
+              --zip-file "fileb://build/lambda/$service.zip"
+            aws lambda wait function-updated-v2 \
+              --function-name "gatesight-${{ inputs.environment }}-$service"
+          done

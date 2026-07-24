@@ -23,7 +23,7 @@ REGION = os.getenv("AWS_REGION", "us-east-1")
 TABLE_PREFIX = os.getenv("GATESIGHT_TABLE_PREFIX", "gatesight-local")
 CONFIG_PREFIX = os.getenv("GATESIGHT_CONFIG_PREFIX", "")
 DUPLICATE_WINDOW_SECONDS = int(
-    get_parameter(f"{CONFIG_PREFIX}/duplicate-window", max_age=300)
+    get_parameter(f"{CONFIG_PREFIX}/duplicate-window", max_age=300, decrypt=True)
     if CONFIG_PREFIX
     else os.getenv("GATESIGHT_DUPLICATE_WINDOW_SECONDS", "30")
 )

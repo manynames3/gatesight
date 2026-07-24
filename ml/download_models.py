@@ -47,6 +47,7 @@ def sha256(path: pathlib.Path) -> str:
 def fetch(artifact: dict[str, Any], output: pathlib.Path) -> pathlib.Path:
     destination = output / artifact["filename"]
     if destination.is_file() and sha256(destination) == artifact["sha256"]:
+        destination.chmod(0o644)
         return destination
     output.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(prefix=".model-", dir=output)
@@ -78,6 +79,7 @@ def fetch(artifact: dict[str, Any], output: pathlib.Path) -> pathlib.Path:
         if temporary.stat().st_size != artifact["bytes"]:
             raise ValueError(f"size mismatch for {artifact['name']}")
         temporary.replace(destination)
+        destination.chmod(0o644)
         return destination
     finally:
         temporary.unlink(missing_ok=True)

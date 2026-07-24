@@ -28,12 +28,12 @@ REGION = os.getenv("AWS_REGION", "us-east-1")
 TABLE_PREFIX = os.getenv("GATESIGHT_TABLE_PREFIX", "gatesight-local")
 CONFIG_PREFIX = os.getenv("GATESIGHT_CONFIG_PREFIX", "")
 ALERT_WINDOW_SECONDS = int(
-    get_parameter(f"{CONFIG_PREFIX}/alert-suppression", max_age=300)
+    get_parameter(f"{CONFIG_PREFIX}/alert-suppression", max_age=300, decrypt=True)
     if CONFIG_PREFIX
     else os.getenv("GATESIGHT_ALERT_SUPPRESSION_SECONDS", "900")
 )
 HIGH_CONFIDENCE = float(
-    get_parameter(f"{CONFIG_PREFIX}/high-confidence", max_age=300)
+    get_parameter(f"{CONFIG_PREFIX}/high-confidence", max_age=300, decrypt=True)
     if CONFIG_PREFIX
     else os.getenv("GATESIGHT_HIGH_CONFIDENCE", "0.88")
 )
