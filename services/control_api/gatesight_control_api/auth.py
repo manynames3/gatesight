@@ -23,12 +23,16 @@ def _claims_from_api_gateway(request: Request) -> dict[str, Any]:
 def _groups(claims: dict[str, Any]) -> frozenset[str]:
     raw = claims.get("cognito:groups", [])
     if isinstance(raw, str):
+        value = raw.strip()
         try:
-            decoded = json.loads(raw)
-            raw = decoded if isinstance(decoded, list) else raw.split(",")
+            decoded = json.loads(value)
+            raw = decoded if isinstance(decoded, list) else value.split(",")
         except json.JSONDecodeError:
-            raw = raw.split(",")
-    return frozenset(str(group).strip() for group in raw if str(group).strip())
+            if value.startswith("[") and value.endswith("]"):
+                value = value[1:-1]
+            raw = value.split(",")
+    normalized = (str(group).strip().strip("\"'") for group in raw)
+    return frozenset(group for group in normalized if group)
 
 
 def get_user(

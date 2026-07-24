@@ -188,6 +188,7 @@ resource "aws_lambda_function" "control_api" {
   runtime                        = "python3.12"
   handler                        = "gatesight_control_api.main.handler"
   filename                       = "${var.lambda_zip_directory}/control-api.zip"
+  source_code_hash               = filebase64sha256("${var.lambda_zip_directory}/control-api.zip")
   memory_size                    = 512
   timeout                        = 29
   architectures                  = ["arm64"]

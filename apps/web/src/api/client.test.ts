@@ -47,6 +47,47 @@ describe("ApiClient authentication", () => {
     expect(retryHeaders.get("Authorization")).toBe("Bearer renewed-token");
   });
 
+  it("refreshes a stale session that predates its GateSight role", async () => {
+    const token = vi
+      .fn<(forceRefresh?: boolean) => Promise<string | undefined>>()
+      .mockResolvedValueOnce("stale-token")
+      .mockResolvedValueOnce("renewed-token");
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: { code: "FORBIDDEN", message: "no GateSight role" },
+          }),
+          {
+            status: 403,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            serverTime: "2026-07-23T22:00:00Z",
+            unixTimeMs: 1_774_214_400_000,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test", token);
+
+    await expect(client.getServerTime()).resolves.toMatchObject({
+      unixTimeMs: 1_774_214_400_000,
+    });
+
+    expect(token.mock.calls).toEqual([[false], [true]]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("does not retry a successful authenticated request", async () => {
     const token = vi
       .fn<(forceRefresh?: boolean) => Promise<string | undefined>>()

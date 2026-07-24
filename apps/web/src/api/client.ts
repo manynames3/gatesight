@@ -44,6 +44,13 @@ export class ApiClient {
         cache: "no-store",
       });
       if (response.status === 401 && attempt === 0) continue;
+      if (response.status === 403 && attempt === 0) {
+        const body = (await response
+          .clone()
+          .json()
+          .catch(() => ({}))) as { error?: { message?: string } };
+        if (body.error?.message === "no GateSight role") continue;
+      }
       if (!response.ok) {
         const body = (await response.json().catch(() => ({}))) as {
           error?: { code?: string; message?: string };
