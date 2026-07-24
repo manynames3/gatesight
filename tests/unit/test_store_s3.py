@@ -1,3 +1,4 @@
+import json
 from decimal import Decimal
 from unittest.mock import Mock, patch
 
@@ -33,6 +34,24 @@ def test_dynamodb_writes_convert_nested_floats_to_decimals() -> None:
     )
     values = table.update_item.call_args.kwargs["ExpressionAttributeValues"]
     assert values == {":quality": {"score": Decimal("0.875")}}
+
+
+def test_enqueue_serializes_dynamodb_decimals_as_json_numbers() -> None:
+    store = object.__new__(AwsStore)
+    store.sqs = Mock()
+    store.sqs.send_message.return_value = {"MessageId": "msg-123"}
+
+    message_id = store.enqueue(
+        {
+            "correlation_id": "corr-123",
+            "tenant_id": "tenant_portfolio",
+            "guide_region": {"x": Decimal("0.25")},
+        }
+    )
+
+    assert message_id == "msg-123"
+    body = json.loads(store.sqs.send_message.call_args.kwargs["MessageBody"])
+    assert body["guide_region"] == {"x": 0.25}
 
 
 def test_s3_client_uses_regional_virtual_hosted_urls() -> None:

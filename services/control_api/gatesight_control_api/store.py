@@ -189,7 +189,7 @@ class AwsStore:
     def enqueue(self, job: dict[str, Any]) -> str:
         result = self.sqs.send_message(
             QueueUrl=settings.recognition_queue_url,
-            MessageBody=json.dumps(job, separators=(",", ":")),
+            MessageBody=json.dumps(job, default=_json_default, separators=(",", ":")),
             MessageAttributes={
                 "correlationId": {"DataType": "String", "StringValue": job["correlation_id"]},
                 "tenantId": {"DataType": "String", "StringValue": job["tenant_id"]},
