@@ -90,6 +90,13 @@ data "aws_iam_policy_document" "recognition" {
     ]
   }
   statement {
+    actions = ["dynamodb:PutItem"]
+    resources = [
+      aws_dynamodb_table.domain["observations"].arn,
+      aws_dynamodb_table.outbox.arn
+    ]
+  }
+  statement {
     actions   = ["ssm:GetParameter", "ssm:GetParameters"]
     resources = ["arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${local.prefix}/recognition/*"]
   }

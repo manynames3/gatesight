@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 import boto3
@@ -13,8 +15,20 @@ from gatesight_domain.models import ConsensusResult, DomainEvent, RecognitionJob
 _serializer = TypeSerializer()
 
 
+def _dynamodb_compatible(value: Any) -> Any:
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("DynamoDB values must be finite")
+        return Decimal(str(value))
+    if isinstance(value, list):
+        return [_dynamodb_compatible(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _dynamodb_compatible(item) for key, item in value.items()}
+    return value
+
+
 def serialize(item: dict[str, Any]) -> dict[str, Any]:
-    return {key: _serializer.serialize(value) for key, value in item.items()}
+    return {key: _serializer.serialize(_dynamodb_compatible(value)) for key, value in item.items()}
 
 
 class RecognitionRepository:
