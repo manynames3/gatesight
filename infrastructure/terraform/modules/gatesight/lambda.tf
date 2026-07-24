@@ -123,6 +123,10 @@ data "aws_iam_policy_document" "outbox_publisher" {
     actions   = ["dynamodb:GetRecords", "dynamodb:GetShardIterator", "dynamodb:DescribeStream", "dynamodb:ListStreams"]
     resources = [aws_dynamodb_table.outbox.stream_arn]
   }
+  statement {
+    actions   = ["kms:Decrypt"]
+    resources = [aws_kms_key.data.arn]
+  }
 }
 
 data "aws_iam_policy_document" "visit_projector" {
