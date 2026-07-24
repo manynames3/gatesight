@@ -130,13 +130,10 @@ export function analyzePlatePixels(
   const likelyPlate =
     contrast >= 18 &&
     edgeDensity >= 0.025 &&
-    edgeDensity <= 0.34 &&
     verticalEdgeDensity >= 0.018 &&
-    verticalEdgeDensity <= 0.26 &&
     horizontalEdgeDensity >= 0.012 &&
-    horizontalEdgeDensity <= 0.28 &&
     strokeGroups >= 4 &&
-    strokeGroups <= 28 &&
+    strokeGroups <= 48 &&
     occupiedSectors >= 3 &&
     peakRowEdgeRatio >= 0.08;
 
@@ -186,14 +183,6 @@ function assessSource(
     canvas.width = 1;
     canvas.height = 1;
   }
-}
-
-export function assessLivePlate(
-  video: HTMLVideoElement,
-  canvas: HTMLCanvasElement,
-  region: NormalizedRegion,
-): PlateAssessment {
-  return assessSource(video, video.videoWidth, video.videoHeight, canvas, region);
 }
 
 export async function assessCapturedPlate(
