@@ -30,7 +30,7 @@ def _groups(claims: dict[str, Any]) -> frozenset[str]:
         except json.JSONDecodeError:
             if value.startswith("[") and value.endswith("]"):
                 value = value[1:-1]
-            raw = value.split(",")
+            raw = value.replace(",", " ").split()
     normalized = (str(group).strip().strip("\"'") for group in raw)
     return frozenset(group for group in normalized if group)
 

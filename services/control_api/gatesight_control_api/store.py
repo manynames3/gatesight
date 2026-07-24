@@ -109,12 +109,17 @@ class AwsStore:
         cursor: str | None,
         ascending: bool = False,
     ) -> tuple[list[dict[str, Any]], str | None]:
+        arguments: dict[str, Any] = {
+            "IndexName": index,
+            "KeyConditionExpression": Key(partition_name).eq(partition_value),
+            "Limit": limit,
+            "ScanIndexForward": ascending,
+        }
+        start_key = decode_cursor(cursor)
+        if start_key:
+            arguments["ExclusiveStartKey"] = start_key
         result = self.table(table).query(
-            IndexName=index,
-            KeyConditionExpression=Key(partition_name).eq(partition_value),
-            Limit=limit,
-            ExclusiveStartKey=decode_cursor(cursor) or {},
-            ScanIndexForward=ascending,
+            **arguments,
         )
         return result.get("Items", []), encode_cursor(result.get("LastEvaluatedKey"))
 

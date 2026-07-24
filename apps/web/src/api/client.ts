@@ -126,6 +126,6 @@ export class ApiClient {
 
   getPage<T>(path: string, facilityId: string): Promise<Page<T>> {
     const query = new URLSearchParams({ facilityId });
-    return this.request(`${path}?${query.toString()}`);
+    return this.request(`/v1${path}?${query.toString()}`);
   }
 }

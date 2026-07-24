@@ -112,4 +112,24 @@ describe("ApiClient authentication", () => {
     expect(token.mock.calls).toEqual([[false]]);
     expect(fetchMock).toHaveBeenCalledOnce();
   });
+
+  it("uses versioned API routes for shared data pages", async () => {
+    const token = vi
+      .fn<(forceRefresh?: boolean) => Promise<string | undefined>>()
+      .mockResolvedValue("current-token");
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ items: [], nextCursor: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test", token);
+
+    await client.getPage("/observations", "fac_san_diego");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/v1/observations?facilityId=fac_san_diego",
+    );
+  });
 });
