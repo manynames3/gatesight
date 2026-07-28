@@ -10,6 +10,8 @@ import {
 } from "react";
 import { UserManager, WebStorageStateStore, type User } from "oidc-client-ts";
 
+import { cognitoLogoutUrl, replaceWithCognitoLogout } from "./logout";
+
 interface AuthValue {
   user: User | null;
   ready: boolean;
@@ -186,10 +188,30 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const signOut = useCallback(async () => {
     if (!manager) return;
-    await manager.removeUser();
-    window.sessionStorage.clear();
+    const {
+      VITE_COGNITO_DOMAIN: cognitoDomain,
+      VITE_COGNITO_CLIENT_ID: clientId,
+      VITE_COGNITO_LOGOUT_URI: logoutUri,
+    } = import.meta.env;
+    if (!cognitoDomain || !clientId || !logoutUri) {
+      setAuthError(INITIALIZATION_ERROR);
+      return;
+    }
+    let destination: string;
+    try {
+      destination = cognitoLogoutUrl({ cognitoDomain, clientId, logoutUri });
+    } catch {
+      setAuthError(INITIALIZATION_ERROR);
+      return;
+    }
+    await manager.removeUser().catch(() => undefined);
+    try {
+      window.sessionStorage.clear();
+    } catch {
+      // Remote Cognito logout must still proceed if browser storage becomes unavailable.
+    }
     setUser(null);
-    await manager.signoutRedirect();
+    replaceWithCognitoLogout(destination);
   }, [manager]);
 
   return (
