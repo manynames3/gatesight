@@ -14,7 +14,10 @@ Synchronous API inference is simpler but fragile in the lane. Browser inference 
 
 ## Consequences
 
-Capture is responsive and bursts buffer safely. Results are eventually consistent and the UI needs queued/processing states, timeout guidance, and review.
+Capture is responsive. If saving fails, one burst can remain in memory while
+the tab stays open; a second capture is blocked until the operator retries or
+discards it. Results are eventually consistent and the UI needs
+queued/processing states, timeout guidance, and review.
 
 ## Revisit when
 

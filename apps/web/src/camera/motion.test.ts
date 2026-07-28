@@ -1,4 +1,4 @@
-import { MotionDetector } from "./motion";
+import { MotionDetector, MotionStabilityTracker } from "./motion";
 import { describe, expect, it, vi } from "vitest";
 
 describe("MotionDetector", () => {
@@ -43,5 +43,57 @@ describe("MotionDetector", () => {
     expect(detector.sample(video, canvas, area).moving).toBe(true);
     detector.reset();
     expect(detector.sample(video, canvas, area).moving).toBe(false);
+  });
+});
+
+describe("MotionStabilityTracker", () => {
+  it("waits for a complete stable period after motion stops", () => {
+    const tracker = new MotionStabilityTracker(650);
+
+    expect(tracker.update(true, 1_000)).toEqual({
+      state: "moving",
+      shouldCapture: false,
+    });
+    expect(tracker.update(true, 2_000)).toEqual({
+      state: "moving",
+      shouldCapture: false,
+    });
+    expect(tracker.update(false, 2_050)).toEqual({
+      state: "stabilizing",
+      shouldCapture: false,
+    });
+    expect(tracker.update(false, 2_699)).toEqual({
+      state: "stabilizing",
+      shouldCapture: false,
+    });
+    expect(tracker.update(false, 2_700)).toEqual({
+      state: "stabilizing",
+      shouldCapture: true,
+    });
+    expect(tracker.update(false, 10_000).shouldCapture).toBe(true);
+    tracker.reset();
+    expect(tracker.update(false, 10_001).shouldCapture).toBe(false);
+  });
+
+  it("restarts stabilization when motion resumes", () => {
+    const tracker = new MotionStabilityTracker(650);
+
+    tracker.update(true, 0);
+    tracker.update(false, 100);
+    expect(tracker.update(true, 500).state).toBe("moving");
+    expect(tracker.update(false, 600).shouldCapture).toBe(false);
+    expect(tracker.update(false, 1_249).shouldCapture).toBe(false);
+    expect(tracker.update(false, 1_250).shouldCapture).toBe(true);
+    expect(tracker.update(false, 1_900).shouldCapture).toBe(true);
+  });
+
+  it("does not capture a scene that never moved", () => {
+    const tracker = new MotionStabilityTracker(650);
+
+    expect(tracker.update(false, 0)).toEqual({
+      state: "watching",
+      shouldCapture: false,
+    });
+    expect(tracker.update(false, 10_000).shouldCapture).toBe(false);
   });
 });

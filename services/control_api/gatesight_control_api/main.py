@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
@@ -16,8 +17,14 @@ from botocore.exceptions import ClientError
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from gatesight_domain.models import CaptureStatus
-from gatesight_domain.normalization import normalize_plate
+from gatesight_domain.models import (
+    CaptureStatus,
+    CompletedEventData,
+    Direction,
+    DomainEvent,
+    ObservationState,
+)
+from gatesight_domain.normalization import mask_plate, normalize_plate
 from mangum import Mangum
 
 from gatesight_control_api.api_models import (
@@ -123,10 +130,52 @@ def _get_or_404(store: AwsStore, table: str, tenant_id: str, record_id: str) -> 
 
 
 def _idempotency_existing(
-    store: AwsStore, tenant_id: str, operation: str, key: str
+    store: AwsStore,
+    tenant_id: str,
+    operation: str,
+    key: str,
+    request_fingerprint: str | None = None,
 ) -> dict[str, Any] | None:
-    token = hashlib.sha256(f"{tenant_id}:{operation}:{key}".encode()).hexdigest()
-    return store.get("idempotency", tenant_id, token)
+    token = _idempotency_token(tenant_id, operation, key)
+    existing = store.get("idempotency", tenant_id, token)
+    if (
+        existing
+        and request_fingerprint
+        and existing.get("requestFingerprint") not in {None, request_fingerprint}
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="idempotency key was already used for a different request",
+        )
+    return existing
+
+
+def _idempotency_token(tenant_id: str, operation: str, key: str) -> str:
+    return hashlib.sha256(f"{tenant_id}:{operation}:{key}".encode()).hexdigest()
+
+
+def _request_fingerprint(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _idempotency_record(
+    tenant_id: str,
+    operation: str,
+    key: str,
+    result: dict[str, Any],
+    request_fingerprint: str | None = None,
+) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "tenantId": tenant_id,
+        "recordId": _idempotency_token(tenant_id, operation, key),
+        "operation": operation,
+        "result": result,
+        "expiresAt": int((now() + timedelta(days=1)).timestamp()),
+    }
+    if request_fingerprint:
+        record["requestFingerprint"] = request_fingerprint
+    return record
 
 
 def _record_idempotency(
@@ -135,23 +184,73 @@ def _record_idempotency(
     operation: str,
     key: str,
     result: dict[str, Any],
+    request_fingerprint: str | None = None,
 ) -> None:
-    token = hashlib.sha256(f"{tenant_id}:{operation}:{key}".encode()).hexdigest()
+    record = _idempotency_record(
+        tenant_id,
+        operation,
+        key,
+        result,
+        request_fingerprint,
+    )
     try:
         store.put(
             "idempotency",
-            {
-                "tenantId": tenant_id,
-                "recordId": token,
-                "operation": operation,
-                "result": result,
-                "expiresAt": int((now() + timedelta(days=1)).timestamp()),
-            },
+            record,
             "attribute_not_exists(recordId)",
         )
     except ClientError as error:
         if not is_conditional_failure(error):
             raise
+
+
+def _idempotent_record_id(prefix: str, tenant_id: str, operation: str, key: str) -> str:
+    digest = _idempotency_token(tenant_id, operation, key)
+    return f"{prefix}_{digest[:26]}"
+
+
+def _ensure_action_audit(
+    store: AwsStore,
+    *,
+    tenant_id: str,
+    actor_id: str,
+    action: str,
+    resource_id: str,
+    facility_id: str,
+    occurred_at: str,
+    details: dict[str, Any] | None = None,
+) -> None:
+    record: dict[str, Any] = {
+        "tenantId": tenant_id,
+        "recordId": _idempotent_record_id(
+            "aud",
+            tenant_id,
+            f"audit:{action}",
+            resource_id,
+        ),
+        "actorId": actor_id,
+        "action": action,
+        "resourceId": resource_id,
+        "facilityId": facility_id,
+        "occurredAt": occurred_at,
+    }
+    if details:
+        record["details"] = details
+    try:
+        store.put("audit", record, "attribute_not_exists(recordId)")
+    except ClientError as error:
+        if not is_conditional_failure(error):
+            raise
+
+
+def _redact_plate_values(item: dict[str, Any], user: Any) -> dict[str, Any]:
+    redacted = dict(item)
+    if user.groups.intersection({"ADMIN", "SECURITY"}):
+        return redacted
+    normalized = redacted.pop("normalizedPlate", None)
+    if isinstance(normalized, str) and normalized:
+        redacted["maskedPlate"] = mask_plate(normalized)
+    return redacted
 
 
 @app.get("/v1/time")
@@ -551,59 +650,184 @@ def observation(observation_id: str, user: CurrentUser, store: Store) -> dict[st
 def review_observation(
     observation_id: str,
     body: ObservationReview,
+    request: Request,
     user: Annotated[Any, Depends(require_roles("SECURITY"))],
     store: Store,
     idempotency_key: Annotated[IdempotencyKey, Header(alias="Idempotency-Key")],
 ) -> dict[str, Any]:
-    existing = _idempotency_existing(store, user.tenant_id, "review-observation", idempotency_key)
-    if existing:
-        return dict(existing["result"])
+    operation = f"review-observation:{observation_id}"
     item = _get_or_404(store, "observations", user.tenant_id, observation_id)
     authorize_facility(user, item["facilityId"])
+    request_fingerprint = _request_fingerprint(
+        {
+            "observationId": observation_id,
+            **body.model_dump(mode="json", by_alias=True),
+        }
+    )
+    existing = _idempotency_existing(
+        store,
+        user.tenant_id,
+        operation,
+        idempotency_key,
+        request_fingerprint,
+    )
+    if existing:
+        return dict(existing["result"])
+
+    decision = body.decision.value
+    current_state = str(item.get("state", ""))
     corrected = normalize_plate(body.corrected_plate or "") if body.corrected_plate else None
-    if body.decision.value == "CORRECTED" and not corrected:
+    if decision == "CORRECTED" and not corrected:
         raise HTTPException(status_code=400, detail="a valid corrected plate is required")
-    reviewed_at = now().isoformat()
+    if decision != "CORRECTED" and body.corrected_plate:
+        raise HTTPException(
+            status_code=400,
+            detail="correctedPlate is only valid for a corrected review",
+        )
+    if current_state == "RECOGNIZED" and decision != "CONFIRMED":
+        raise HTTPException(
+            status_code=409,
+            detail="a recognized observation can only be confirmed",
+        )
+    if current_state != "RECOGNIZED" and decision == "CONFIRMED":
+        raise HTTPException(
+            status_code=409,
+            detail="an uncertain observation must be corrected or rejected",
+        )
+
+    reviewed_at_value = now()
+    reviewed_at = reviewed_at_value.isoformat()
+    final_state = "RECOGNIZED" if decision == "CORRECTED" else current_state
+    result = {
+        "observationId": observation_id,
+        "reviewDecision": decision,
+        "state": final_state,
+    }
     values = {
-        ":decision": body.decision.value,
-        ":plate": corrected or item.get("normalizedPlate", ""),
+        ":decision": decision,
         ":note": body.note,
         ":user": user.subject,
         ":at": reviewed_at,
         ":pending": "PENDING",
+        ":recognized": "RECOGNIZED",
     }
-    try:
-        updated = store.update(
-            "observations",
+    expression = "SET reviewDecision=:decision, reviewNote=:note, reviewedBy=:user, reviewedAt=:at"
+    if decision == "CORRECTED":
+        values.update(
+            {
+                ":plate": corrected,
+                ":score": "1.0",
+                ":reason": "HUMAN_REVIEW_CORRECTED",
+            }
+        )
+        expression += (
+            ", normalizedPlate=:plate, #state=:recognized, consensusScore=:score, "
+            "decisionReason=:reason"
+        )
+    elif decision == "REJECTED":
+        values[":reason"] = "HUMAN_REVIEW_REJECTED"
+        expression += ", decisionReason=:reason"
+
+    state_condition = "#state=:recognized" if decision == "CONFIRMED" else "#state<>:recognized"
+    audit = {
+        "tenantId": user.tenant_id,
+        "recordId": _idempotent_record_id(
+            "aud",
             user.tenant_id,
-            observation_id,
-            "SET reviewDecision=:decision, normalizedPlate=:plate, reviewNote=:note, "
-            "reviewedBy=:user, reviewedAt=:at",
-            values,
-            condition="attribute_not_exists(reviewDecision) OR reviewDecision=:pending",
+            operation,
+            idempotency_key,
+        ),
+        "actorId": user.subject,
+        "action": "OBSERVATION_REVIEWED",
+        "resourceId": observation_id,
+        "facilityId": item["facilityId"],
+        "occurredAt": reviewed_at,
+        "details": {"decision": decision},
+    }
+    idempotency = _idempotency_record(
+        user.tenant_id,
+        operation,
+        idempotency_key,
+        result,
+        request_fingerprint,
+    )
+    outbox: dict[str, Any] | None = None
+    if decision == "CORRECTED":
+        outbox_id = _idempotent_record_id(
+            "out",
+            user.tenant_id,
+            operation,
+            idempotency_key,
+        )
+        event = DomainEvent(
+            id=outbox_id,
+            type="com.gatesight.plate-recognition.completed.v1",
+            source="/services/control-api",
+            subject=f"observations/{observation_id}",
+            time=reviewed_at_value,
+            correlation_id=request.state.correlation_id,
+            tenant_id=user.tenant_id,
+            data=CompletedEventData(
+                observation_id=observation_id,
+                capture_id=item["captureId"],
+                facility_id=item["facilityId"],
+                station_id=item["stationId"],
+                direction=Direction(item["direction"]),
+                state=ObservationState.RECOGNIZED,
+                captured_at=datetime.fromisoformat(item["capturedAt"]),
+                confidence_category="HIGH",
+                synthetic=bool(item.get("synthetic", False)),
+            ),
+        )
+        outbox = {
+            "tenantId": user.tenant_id,
+            "recordId": outbox_id,
+            "status": "PENDING",
+            "eventType": event.type,
+            "event": event.model_dump(mode="json", by_alias=True),
+            "createdAt": reviewed_at,
+            "publishAttempts": 0,
+        }
+    try:
+        store.save_observation_review(
+            tenant_id=user.tenant_id,
+            observation_id=observation_id,
+            capture_id=item["captureId"],
+            update_expression=expression,
+            update_values=values,
+            update_names={"#state": "state"},
+            update_condition=(
+                "(attribute_not_exists(reviewDecision) OR reviewDecision=:pending) "
+                f"AND {state_condition}"
+            ),
+            audit=audit,
+            idempotency=idempotency,
+            outbox=outbox,
+            client_request_token=_idempotency_token(
+                user.tenant_id,
+                operation,
+                idempotency_key,
+            )[:36],
         )
     except ClientError as error:
-        if is_conditional_failure(error):
+        replay = _idempotency_existing(
+            store,
+            user.tenant_id,
+            operation,
+            idempotency_key,
+            request_fingerprint,
+        )
+        if replay:
+            return dict(replay["result"])
+        if error.response.get("Error", {}).get("Code") in {
+            "ConditionalCheckFailedException",
+            "TransactionCanceledException",
+        }:
             raise HTTPException(
-                status_code=409, detail="observation was already reviewed"
+                status_code=409,
+                detail="observation was already reviewed or changed",
             ) from error
         raise
-    audit_id = new_id("aud")
-    store.put(
-        "audit",
-        {
-            "tenantId": user.tenant_id,
-            "recordId": audit_id,
-            "actorId": user.subject,
-            "action": "OBSERVATION_REVIEWED",
-            "resourceId": observation_id,
-            "facilityId": item["facilityId"],
-            "occurredAt": reviewed_at,
-            "details": {"decision": body.decision.value},
-        },
-    )
-    result = {"observationId": observation_id, "reviewDecision": updated["reviewDecision"]}
-    _record_idempotency(store, user.tenant_id, "review-observation", idempotency_key, result)
     return result
 
 
@@ -612,37 +836,79 @@ def delete_observation_media(
     observation_id: str,
     user: Annotated[Any, Depends(require_roles("SECURITY"))],
     store: Store,
+    idempotency_key: Annotated[IdempotencyKey, Header(alias="Idempotency-Key")],
 ) -> dict[str, Any]:
+    operation = f"delete-observation-media:{observation_id}"
+    existing = _idempotency_existing(store, user.tenant_id, operation, idempotency_key)
+    if existing:
+        return dict(existing["result"])
     item = _get_or_404(store, "observations", user.tenant_id, observation_id)
     authorize_facility(user, item["facilityId"])
-    capture = _get_or_404(store, "captures", user.tenant_id, item["captureId"])
-    store.delete_media(
-        [
-            *capture.get("frameKeys", []),
-            *item.get("derivedCropKeys", []),
-        ]
+    deleted_at = item.get("mediaDeletedAt")
+    deleted_by = item.get("mediaDeletedBy")
+    if item.get("mediaAvailable", True) is not False:
+        capture = _get_or_404(store, "captures", user.tenant_id, item["captureId"])
+        store.delete_media(
+            [
+                *capture.get("frameKeys", []),
+                *item.get("derivedCropKeys", []),
+            ]
+        )
+        deleted_at = now().isoformat()
+        deleted_by = user.subject
+        try:
+            item = store.update(
+                "observations",
+                user.tenant_id,
+                observation_id,
+                "SET mediaDeletedAt=:at, mediaDeletedBy=:actor, mediaAvailable=:false",
+                {
+                    ":at": deleted_at,
+                    ":actor": deleted_by,
+                    ":false": False,
+                    ":true": True,
+                },
+                condition=(
+                    "attribute_not_exists(mediaDeletedAt) AND "
+                    "(attribute_not_exists(mediaAvailable) OR mediaAvailable=:true)"
+                ),
+            )
+        except ClientError as error:
+            if not is_conditional_failure(error):
+                raise
+            item = _get_or_404(store, "observations", user.tenant_id, observation_id)
+            if item.get("mediaAvailable", True) is not False or not item.get("mediaDeletedAt"):
+                raise HTTPException(
+                    status_code=409,
+                    detail="observation media deletion conflicted with another update",
+                ) from error
+            deleted_at = item["mediaDeletedAt"]
+            deleted_by = item.get("mediaDeletedBy", user.subject)
+    if not isinstance(deleted_at, str) or not deleted_at:
+        raise HTTPException(
+            status_code=409,
+            detail="observation media deletion state is incomplete",
+        )
+    if not isinstance(deleted_by, str) or not deleted_by:
+        deleted_by = user.subject
+    _ensure_action_audit(
+        store,
+        tenant_id=user.tenant_id,
+        actor_id=deleted_by,
+        action="OBSERVATION_MEDIA_DELETED",
+        resource_id=observation_id,
+        facility_id=item["facilityId"],
+        occurred_at=deleted_at,
     )
-    deleted_at = now().isoformat()
-    store.update(
-        "observations",
+    result = {"observationId": observation_id, "mediaDeletedAt": deleted_at}
+    _record_idempotency(
+        store,
         user.tenant_id,
-        observation_id,
-        "SET mediaDeletedAt=:at, mediaAvailable=:false",
-        {":at": deleted_at, ":false": False},
+        operation,
+        idempotency_key,
+        result,
     )
-    store.put(
-        "audit",
-        {
-            "tenantId": user.tenant_id,
-            "recordId": new_id("aud"),
-            "actorId": user.subject,
-            "action": "OBSERVATION_MEDIA_DELETED",
-            "resourceId": observation_id,
-            "facilityId": item["facilityId"],
-            "occurredAt": deleted_at,
-        },
-    )
-    return {"observationId": observation_id, "mediaDeletedAt": deleted_at}
+    return result
 
 
 @app.get("/v1/visits", response_model=Page)
@@ -654,7 +920,9 @@ def visits(
     cursor: Annotated[str | None, Query(max_length=2048)] = None,
 ) -> Page:
     authorize_facility(user, facility_id)
-    return _facility_page(store, "visits", facility_id, limit, cursor)
+    page = _facility_page(store, "visits", facility_id, limit, cursor)
+    page.items = [_redact_plate_values(item, user) for item in page.items]
+    return page
 
 
 @app.get("/v1/visits/open", response_model=Page)
@@ -674,6 +942,7 @@ def open_visits(
         limit=limit,
         cursor=cursor,
     )
+    items = [_redact_plate_values(item, user) for item in items]
     return Page(items=items, next_cursor=next_cursor)
 
 
@@ -681,12 +950,12 @@ def open_visits(
 def visit(visit_id: str, user: CurrentUser, store: Store) -> dict[str, Any]:
     item = _get_or_404(store, "visits", user.tenant_id, visit_id)
     authorize_facility(user, item["facilityId"])
-    return item
+    return _redact_plate_values(item, user)
 
 
 @app.get("/v1/registrations", response_model=Page)
 def registrations(
-    user: CurrentUser,
+    user: Annotated[Any, Depends(require_roles("SECURITY"))],
     store: Store,
     facility_id: Annotated[str, Query(alias="facilityId", min_length=10, max_length=64)],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -709,15 +978,41 @@ def create_registration(
     body: RegistrationCreate,
     user: Annotated[Any, Depends(require_roles("SECURITY"))],
     store: Store,
+    idempotency_key: Annotated[IdempotencyKey, Header(alias="Idempotency-Key")],
 ) -> dict[str, Any]:
     normalized = normalize_plate(body.normalized_plate)
     if not normalized:
         raise HTTPException(status_code=400, detail="invalid normalized plate")
     if body.facility_id:
         authorize_facility(user, body.facility_id)
+    request_payload = {
+        "normalizedPlate": normalized,
+        "displayPlate": body.display_plate,
+        "facilityId": body.facility_id,
+        "plateRegion": body.plate_region,
+        "description": body.description,
+        "validFrom": body.valid_from.isoformat(),
+        "validUntil": body.valid_until.isoformat() if body.valid_until else None,
+        "status": body.status.value,
+    }
+    request_fingerprint = _request_fingerprint(request_payload)
+    existing = _idempotency_existing(
+        store,
+        user.tenant_id,
+        "create-registration",
+        idempotency_key,
+        request_fingerprint,
+    )
+    if existing:
+        return dict(existing["result"])
     record = {
         "tenantId": user.tenant_id,
-        "recordId": new_id("reg"),
+        "recordId": _idempotent_record_id(
+            "reg",
+            user.tenant_id,
+            "create-registration",
+            idempotency_key,
+        ),
         "normalizedPlate": normalized,
         "displayPlate": body.display_plate,
         "facilityId": body.facility_id,
@@ -731,7 +1026,41 @@ def create_registration(
         "createdAt": now().isoformat(),
         "createdBy": user.subject,
     }
-    store.put("registrations", record, "attribute_not_exists(recordId)")
+    try:
+        store.put("registrations", record, "attribute_not_exists(recordId)")
+    except ClientError as error:
+        if not is_conditional_failure(error):
+            raise
+        persisted = store.get("registrations", user.tenant_id, record["recordId"])
+        if persisted:
+            persisted_fingerprint = _request_fingerprint(
+                {
+                    "normalizedPlate": persisted.get("normalizedPlate"),
+                    "displayPlate": persisted.get("displayPlate"),
+                    "facilityId": persisted.get("facilityId"),
+                    "plateRegion": persisted.get("plateRegion"),
+                    "description": persisted.get("description"),
+                    "validFrom": persisted.get("validFrom"),
+                    "validUntil": persisted.get("validUntil"),
+                    "status": str(persisted.get("status", "")),
+                }
+            )
+            if persisted_fingerprint != request_fingerprint:
+                raise HTTPException(
+                    status_code=409,
+                    detail="idempotency key was already used for a different request",
+                ) from error
+            record = persisted
+        else:
+            raise
+    _record_idempotency(
+        store,
+        user.tenant_id,
+        "create-registration",
+        idempotency_key,
+        record,
+        request_fingerprint,
+    )
     return record
 
 
@@ -784,7 +1113,11 @@ def alerts(
     cursor: Annotated[str | None, Query(max_length=2048)] = None,
 ) -> Page:
     authorize_facility(user, facility_id)
-    return _facility_page(store, "alerts", facility_id, limit, cursor)
+    page = _facility_page(store, "alerts", facility_id, limit, cursor)
+    for item in page.items:
+        item.pop("acknowledgeRequestToken", None)
+        item.pop("resolveRequestToken", None)
+    return page
 
 
 def _transition_alert(
@@ -792,21 +1125,87 @@ def _transition_alert(
     target: str,
     user: Any,
     store: AwsStore,
+    idempotency_key: str,
 ) -> dict[str, Any]:
+    action = "acknowledge" if target == "ACKNOWLEDGED" else "resolve"
+    operation = f"{action}-alert:{alert_id}"
+    existing = _idempotency_existing(store, user.tenant_id, operation, idempotency_key)
+    if existing:
+        return dict(existing["result"])
     alert = _get_or_404(store, "alerts", user.tenant_id, alert_id)
     authorize_facility(user, alert["facilityId"])
-    transition_at = now().isoformat()
+    request_token = _idempotency_token(user.tenant_id, operation, idempotency_key)
+    token_field = f"{action}RequestToken"
+    time_field = "acknowledgedAt" if target == "ACKNOWLEDGED" else "resolvedAt"
+    actor_field = "acknowledgedBy" if target == "ACKNOWLEDGED" else "resolvedBy"
     allowed = ["OPEN"] if target == "ACKNOWLEDGED" else ["OPEN", "ACKNOWLEDGED"]
-    if alert["status"] not in allowed:
+    replayed = alert.get(token_field) == request_token or alert.get("status") == target
+    if not replayed and alert["status"] not in allowed:
         raise HTTPException(status_code=409, detail=f"alert cannot transition to {target}")
-    return store.update(
-        "alerts",
-        user.tenant_id,
-        alert_id,
-        "SET #status=:target, statusActor=:actor, statusChangedAt=:at",
-        {":target": target, ":actor": user.subject, ":at": transition_at},
-        names={"#status": "status"},
+    if not replayed:
+        attempted_at = now().isoformat()
+        values = {
+            ":target": target,
+            ":actor": user.subject,
+            ":at": attempted_at,
+            ":token": request_token,
+            ":open": "OPEN",
+        }
+        condition = "#status=:open"
+        if target == "RESOLVED":
+            values[":acknowledged"] = "ACKNOWLEDGED"
+            condition = "(#status=:open OR #status=:acknowledged)"
+        try:
+            alert = store.update(
+                "alerts",
+                user.tenant_id,
+                alert_id,
+                f"SET #status=:target, statusActor=:actor, statusChangedAt=:at, "
+                f"{time_field}=:at, {actor_field}=:actor, {token_field}=:token",
+                values,
+                names={"#status": "status"},
+                condition=condition,
+            )
+        except ClientError as error:
+            if not is_conditional_failure(error):
+                raise
+            alert = _get_or_404(store, "alerts", user.tenant_id, alert_id)
+            if alert.get(token_field) != request_token and alert.get("status") != target:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"alert cannot transition to {target}",
+                ) from error
+    transition_at_value = alert.get(time_field, alert.get("statusChangedAt"))
+    transition_actor = alert.get(actor_field, alert.get("statusActor", user.subject))
+    if not isinstance(transition_at_value, str) or not transition_at_value:
+        raise HTTPException(status_code=409, detail="alert transition state is incomplete")
+    transition_at = transition_at_value
+    if not isinstance(transition_actor, str) or not transition_actor:
+        transition_actor = user.subject
+    _ensure_action_audit(
+        store,
+        tenant_id=user.tenant_id,
+        actor_id=transition_actor,
+        action=f"ALERT_{target}",
+        resource_id=alert_id,
+        facility_id=alert["facilityId"],
+        occurred_at=transition_at,
+        details={"status": target},
     )
+    result = {
+        "alertId": alert_id,
+        "status": target,
+        "statusActor": transition_actor,
+        "statusChangedAt": transition_at,
+    }
+    _record_idempotency(
+        store,
+        user.tenant_id,
+        operation,
+        idempotency_key,
+        result,
+    )
+    return result
 
 
 @app.post("/v1/alerts/{alert_id}/acknowledge")
@@ -814,8 +1213,9 @@ def acknowledge_alert(
     alert_id: str,
     user: Annotated[Any, Depends(require_roles("SECURITY"))],
     store: Store,
+    idempotency_key: Annotated[IdempotencyKey, Header(alias="Idempotency-Key")],
 ) -> dict[str, Any]:
-    return _transition_alert(alert_id, "ACKNOWLEDGED", user, store)
+    return _transition_alert(alert_id, "ACKNOWLEDGED", user, store, idempotency_key)
 
 
 @app.post("/v1/alerts/{alert_id}/resolve")
@@ -823,8 +1223,9 @@ def resolve_alert(
     alert_id: str,
     user: Annotated[Any, Depends(require_roles("SECURITY"))],
     store: Store,
+    idempotency_key: Annotated[IdempotencyKey, Header(alias="Idempotency-Key")],
 ) -> dict[str, Any]:
-    return _transition_alert(alert_id, "RESOLVED", user, store)
+    return _transition_alert(alert_id, "RESOLVED", user, store, idempotency_key)
 
 
 @app.get("/v1/system/health")

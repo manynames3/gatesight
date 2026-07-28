@@ -18,7 +18,10 @@ export async function pollCapture(
   let delay = 750;
   const deadline = Date.now() + 120_000;
   while (!signal.aborted && Date.now() < deadline) {
-    const result = await client.getCapture(captureId);
+    const result = await client.getCapture(captureId, signal);
+    if (signal.aborted) {
+      throw new DOMException("Polling aborted", "AbortError");
+    }
     onUpdate(result);
     if (terminal.has(result.status)) return result;
     await new Promise<void>((resolve, reject) => {

@@ -72,11 +72,23 @@ Observation saved
 - The app requests video only—never microphone access.
 - The operator can choose any camera exposed by the browser.
 - Manual and automatic capture use the same best-four-of-five path.
+- A brief API slowdown cannot delay the exposure: frames are taken first, then saved.
 - Frames stay in memory until upload or discard.
+- If the connection drops, one pending burst remains in the open tab and automatically
+  retries when the browser comes back online.
 - One strong frame or two possible frames must show plate-like character structure before upload.
 - The app favors sharp, evenly lit frames and gives distance, glare, lighting, or alignment guidance when it rejects a burst.
 - Blank scenes and simple non-character patterns are discarded without upload.
-- Closing the tab before upload can lose the frames because GateSight intentionally creates no offline copy.
+- Closing, reloading, or leaving the camera page before upload loses the frames because GateSight intentionally creates no offline copy.
+
+### What ADMIN and SECURITY reviewers can do
+
+- Open a protected observation and inspect its available evidence.
+- Confirm, correct, or reject a recognition result with an audit note.
+- Register an allowed or blocked vehicle for the selected facility.
+- Block or restore an existing vehicle registration.
+- Acknowledge and resolve security alerts.
+- Refresh live records without losing the last successful view during a network error.
 
 ### What happens in AWS
 

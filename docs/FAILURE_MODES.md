@@ -11,7 +11,7 @@ no security classification.
 | Camera disconnected | track `ended`, `devicechange` | Mark disconnected; stop auto assumptions | Reconnect and re-enable |
 | Low-resolution camera | ideal constraint falls back | Capture continues; quality may review | Physical alignment/test |
 | Browser/OS suspends tab | heartbeat stale | Capture unavailable | Operator/kiosk supervision |
-| Offline before upload | online event, XHR error | Blobs stay only while page lives | Network return/retry or discard |
+| Offline or failed before upload | online event, XHR/API error | One burst stays in memory; a second capture is disabled and nothing is written to browser storage | Offline→online retries automatically; otherwise use Retry or Discard. Closing, reloading, or leaving the camera page loses the burst |
 | Partial upload | one XHR/HeadObject fails | No completion/queue | Retry bounded while open |
 | Presign expires | S3 rejects POST | No cross-session key reuse | Create a fresh session |
 | Invalid/oversized image | API POST policy + worker validation | Reject/fail, never recognize | Investigate client/tampering |

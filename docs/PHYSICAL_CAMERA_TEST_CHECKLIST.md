@@ -22,7 +22,7 @@ Record the browser/version, operating system, camera, lighting, network, UTC tim
 - [ ] Screen Wake Lock while the station is automatic; reacquired after visibility.
 - [ ] Heartbeat healthy, then stale when browser/network stops.
 - [ ] Offline/online retry while page remains open.
-- [ ] Navigation warns with pending frames; discard releases them.
+- [ ] Browser close or reload warns while frames are pending; Retry saves them and Discard releases them.
 - [ ] Browser storage inspection contains no images/base64/object URLs.
 - [ ] Canvas is cleared and no service worker/background sync exists.
 - [ ] Direct upload uses private S3; no public image URL.

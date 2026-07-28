@@ -9,11 +9,14 @@ afterEach(() => {
 describe("pollCapture", () => {
   it("returns a terminal result immediately", async () => {
     const result = { recordId: "cap_123", status: "RECOGNIZED" as const };
-    const client = { getCapture: vi.fn().mockResolvedValue(result) } as unknown as ApiClient;
+    const getCapture = vi.fn().mockResolvedValue(result);
+    const client = { getCapture } as unknown as ApiClient;
+    const controller = new AbortController();
     const update = vi.fn();
     await expect(
-      pollCapture(client, "cap_123", new AbortController().signal, update),
+      pollCapture(client, "cap_123", controller.signal, update),
     ).resolves.toEqual(result);
+    expect(getCapture).toHaveBeenCalledWith("cap_123", controller.signal);
     expect(update).toHaveBeenCalledWith(result);
   });
 
@@ -38,5 +41,30 @@ describe("pollCapture", () => {
       "Polling stopped",
     );
     expect(getCapture).not.toHaveBeenCalled();
+  });
+
+  it("does not publish a result that resolves after polling is aborted", async () => {
+    let resolveRequest:
+      | ((value: { recordId: string; status: "RECOGNIZED" }) => void)
+      | undefined;
+    const getCapture = vi.fn(
+      () =>
+        new Promise<{ recordId: string; status: "RECOGNIZED" }>((resolve) => {
+          resolveRequest = resolve;
+        }),
+    );
+    const client = { getCapture } as unknown as ApiClient;
+    const controller = new AbortController();
+    const update = vi.fn();
+    const polling = pollCapture(client, "cap_old", controller.signal, update);
+
+    await vi.waitFor(() => {
+      expect(getCapture).toHaveBeenCalledWith("cap_old", controller.signal);
+    });
+    controller.abort();
+    resolveRequest?.({ recordId: "cap_old", status: "RECOGNIZED" });
+
+    await expect(polling).rejects.toMatchObject({ name: "AbortError" });
+    expect(update).not.toHaveBeenCalled();
   });
 });

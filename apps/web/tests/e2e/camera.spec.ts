@@ -8,15 +8,10 @@ test("sign-in page never requests microphone permission", async ({ page }) => {
   await expect(page.getByText(/not affiliated with or endorsed/)).toBeVisible();
 });
 
-test("camera permission denial is surfaced", async ({
-  browserName,
+test("sign-in entry point is available without requesting camera access", async ({
   context,
   page,
 }) => {
-  test.skip(
-    browserName === "webkit",
-    "WebKit permission emulation is not deterministic",
-  );
   await context.clearPermissions();
   await page.goto("/sign-in");
   await expect(

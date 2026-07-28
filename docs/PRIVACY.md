@@ -35,7 +35,17 @@ No offline persistence improves privacy but reduces availability: an unuploaded 
 
 ## Access and deletion
 
-There are no public object URLs. Security/admin access is tenant/facility checked. `POST /v1/observations/{id}/delete-media` removes raw media and creates an audit fact with actor/time/resource, without retaining bytes. SNS never includes raw images or full plates.
+There are no public object URLs. `ADMIN` and `SECURITY` users can receive full
+plate values and temporary protected evidence links only after the applicable
+tenant/facility authorization checks. `OPERATOR` and `VIEWER` visit responses
+replace the full value with a masked plate; their observation responses omit
+the full plate, raw candidates, and media links. Registration and review
+operations are restricted to `ADMIN` and `SECURITY`.
+
+`POST /v1/observations/{id}/delete-media` removes raw media from the active
+application view and creates an audit fact with actor/time/resource, without
+copying the bytes into the audit record. SNS never includes raw images or full
+plates.
 
 Backups/PITR and S3 versioning can affect deletion timelines; production policy must document those recovery windows.
 

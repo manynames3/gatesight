@@ -71,7 +71,11 @@ data "aws_iam_policy_document" "control_api" {
     resources = [aws_sqs_queue.recognition_dlq.arn]
   }
   statement {
-    actions   = ["dynamodb:Query"]
+    actions = [
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:TransactWriteItems"
+    ]
     resources = [aws_dynamodb_table.outbox.arn]
   }
   statement {

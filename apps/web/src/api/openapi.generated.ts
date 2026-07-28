@@ -675,7 +675,8 @@ export interface operations {
     acknowledge_alert_v1_alerts__alert_id__acknowledge_post: {
         parameters: {
             query?: never;
-            header?: {
+            header: {
+                "Idempotency-Key": string;
                 "x-gatesight-dev-claims"?: string | null;
             };
             path: {
@@ -710,7 +711,8 @@ export interface operations {
     resolve_alert_v1_alerts__alert_id__resolve_post: {
         parameters: {
             query?: never;
-            header?: {
+            header: {
+                "Idempotency-Key": string;
                 "x-gatesight-dev-claims"?: string | null;
             };
             path: {
@@ -1141,7 +1143,8 @@ export interface operations {
     delete_observation_media_v1_observations__observation_id__delete_media_post: {
         parameters: {
             query?: never;
-            header?: {
+            header: {
+                "Idempotency-Key": string;
                 "x-gatesight-dev-claims"?: string | null;
             };
             path: {
@@ -1251,7 +1254,8 @@ export interface operations {
     create_registration_v1_registrations_post: {
         parameters: {
             query?: never;
-            header?: {
+            header: {
+                "Idempotency-Key": string;
                 "x-gatesight-dev-claims"?: string | null;
             };
             path?: never;

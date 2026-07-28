@@ -158,7 +158,10 @@ class DomainEvent(StrictModel):
     specversion: Literal["1.0"] = "1.0"
     id: Identifier
     type: Literal["com.gatesight.plate-recognition.completed.v1"]
-    source: Literal["/services/recognition-worker"] = "/services/recognition-worker"
+    source: Literal[
+        "/services/recognition-worker",
+        "/services/control-api",
+    ] = "/services/recognition-worker"
     subject: str
     time: datetime
     datacontenttype: Literal["application/json"] = "application/json"
