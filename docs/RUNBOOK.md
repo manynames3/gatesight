@@ -34,15 +34,19 @@ environment. Do not select `prod` while the model-rights release gate remains
 blocked.
 
 1. Merge only after every pull-request check passes.
-2. Wait for `.github/workflows/deploy-worker.yml` on `main`. Despite its name,
-   it deploys the recognition worker, control API, and event-consumer ZIP
-   Lambdas to `dev`; it does not deploy Cloudflare Pages.
-3. For a coordinated web or API-contract release, run
-   `.github/workflows/deploy.yml` with `environment=dev` at the same reviewed
-   commit. It deploys AWS and Cloudflare Pages, then runs the authenticated
-   smoke test and recognition canary.
-4. Confirm System health, then complete the physical camera checklist with an
-   authorized test plate.
+2. Wait for the `deploy-backend` run from
+   `.github/workflows/deploy-worker.yml` on `main`. It deploys the recognition
+   worker, control API, and event-consumer ZIP Lambdas to `dev`; it does not
+   apply Terraform or deploy Cloudflare Pages.
+3. For an infrastructure change, use an authorized operator session to save,
+   review, and apply the smallest Terraform plan that implements the change.
+   Do not apply stale Lambda artifacts during an infrastructure-only release.
+4. Build the reviewed web commit with the `dev` API, S3, and Cognito values,
+   then deploy `apps/web/dist` with Wrangler 4 to the `gatesight` Pages project
+   on branch `main`. Record the reviewed merge commit in the deployment.
+5. Run the authenticated smoke test and recognition canary. Confirm System
+   health, then complete the physical camera checklist with an authorized test
+   plate.
 
 ## Recognition DLQ
 

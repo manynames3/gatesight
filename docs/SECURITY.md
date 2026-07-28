@@ -15,7 +15,7 @@ Vehicle images, plate readings/candidates, registration authorization, visits/al
 | Upload to arbitrary key/type/size | Server key, exact-key POST condition, JPEG MIME, byte limit, capture metadata, short expiry |
 | Cross-tenant object access | Gateway JWT + backend tenant/facility check on every operation |
 | Role bypass in UI | Backend role dependencies and response redaction |
-| Token theft from persistent storage | PKCE, session storage, short tokens, logout clear/revocation |
+| Token/session persistence on a shared station | PKCE, session storage, and short tokens; save or discard any pending capture, then use Sign out—closing the tab alone does not end the Cognito hosted session |
 | CSRF | Bearer tokens, no credential cookies, restricted CORS |
 | XSS/exfiltration | React escaping, restrictive CSP, no analytics identifiers, no raw HTML |
 | Replay/duplicate mutation | Required idempotency keys, DynamoDB conditional writes, deterministic event markers |
@@ -35,7 +35,12 @@ KMS permissions do not grant data access by themselves. Key policy review remain
 
 ## Secrets
 
-The browser receives only public Cognito configuration. No client secret exists. GitHub stores Cloudflare/API smoke secrets; AWS authentication is OIDC. Non-secret thresholds live in SSM Parameter Store. Do not put plates or tokens in environment variables.
+The browser receives only public Cognito configuration. No client secret exists.
+The GitHub backend workflow uses AWS OIDC; the current Pages release uses an
+authenticated Wrangler operator session. Future Pages automation must use a
+narrowly scoped Cloudflare token and mint a short-lived smoke token rather than
+persisting a reusable Cognito token. Non-secret thresholds live in SSM
+Parameter Store. Do not put plates or tokens in environment variables.
 
 ## Residual risks
 
