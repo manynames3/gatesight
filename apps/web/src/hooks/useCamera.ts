@@ -21,6 +21,8 @@ function permissionFromError(error: unknown): CameraPermission {
 export function useCamera() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const activeTrackRef = useRef<MediaStreamTrack | null>(null);
+  const startGenerationRef = useRef(0);
   const selectedDeviceIdRef = useRef("");
   const hasMediaDevices =
     typeof navigator !== "undefined" && Boolean(navigator.mediaDevices);
@@ -36,12 +38,19 @@ export function useCamera() {
     hasMediaDevices ? null : "This browser does not expose the required camera APIs.",
   );
 
-  const stop = useCallback(() => {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
+  const stopCurrentStream = useCallback(() => {
+    const stream = streamRef.current;
     streamRef.current = null;
+    activeTrackRef.current = null;
+    stream?.getTracks().forEach((track) => track.stop());
     setResolution(null);
     if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
+
+  const stop = useCallback(() => {
+    startGenerationRef.current += 1;
+    stopCurrentStream();
+  }, [stopCurrentStream]);
 
   const refreshDevices = useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) {
@@ -67,21 +76,37 @@ export function useCamera() {
 
   const start = useCallback(
     async (deviceId?: string) => {
+      const generation = startGenerationRef.current + 1;
+      startGenerationRef.current = generation;
       setPermission("requesting");
       setError(null);
-      stop();
+      stopCurrentStream();
       try {
         const stream = await navigator.mediaDevices.getUserMedia(constraints(deviceId));
+        if (generation !== startGenerationRef.current) {
+          stream.getTracks().forEach((item) => item.stop());
+          return;
+        }
         const [track] = stream.getVideoTracks();
         if (!track) throw new DOMException("No camera track", "NotFoundError");
         track.addEventListener("ended", () => {
-          setPermission("disconnected");
-          setError("The selected camera disconnected.");
+          if (activeTrackRef.current === track) {
+            streamRef.current = null;
+            activeTrackRef.current = null;
+            setResolution(null);
+            setPermission("disconnected");
+            setError("The selected camera disconnected. Reconnect it or choose another camera.");
+          }
         });
         streamRef.current = stream;
+        activeTrackRef.current = track;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
+        }
+        if (generation !== startGenerationRef.current) {
+          stream.getTracks().forEach((item) => item.stop());
+          return;
         }
         const settings = track.getSettings();
         const width = settings.width ?? videoRef.current?.videoWidth ?? 0;
@@ -93,6 +118,8 @@ export function useCamera() {
         setSelectedDeviceId(selected);
         await refreshDevices();
       } catch (caught) {
+        if (generation !== startGenerationRef.current) return;
+        stopCurrentStream();
         setPermission(permissionFromError(caught));
         setError(
           caught instanceof DOMException || caught instanceof Error
@@ -101,7 +128,7 @@ export function useCamera() {
         );
       }
     },
-    [refreshDevices, stop],
+    [refreshDevices, stopCurrentStream],
   );
 
   useEffect(() => {

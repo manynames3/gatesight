@@ -27,6 +27,23 @@ Use this guide when GateSight is slow, unavailable, backed up, or producing an u
 3. Confirm whether capture continues. Queue backlog should delay results without blocking new browser photographs/uploads.
 4. Use X-Ray/logs with correlation ID; do not enable request/event logging containing sensitive payloads.
 
+## Portfolio release
+
+The public, non-commercial portfolio deployment uses the GitHub `dev`
+environment. Do not select `prod` while the model-rights release gate remains
+blocked.
+
+1. Merge only after every pull-request check passes.
+2. Wait for `.github/workflows/deploy-worker.yml` on `main`. Despite its name,
+   it deploys the recognition worker, control API, and event-consumer ZIP
+   Lambdas to `dev`; it does not deploy Cloudflare Pages.
+3. For a coordinated web or API-contract release, run
+   `.github/workflows/deploy.yml` with `environment=dev` at the same reviewed
+   commit. It deploys AWS and Cloudflare Pages, then runs the authenticated
+   smoke test and recognition canary.
+4. Confirm System health, then complete the physical camera checklist with an
+   authorized test plate.
+
 ## Recognition DLQ
 
 1. Restrict the operator to `ADMIN`; inspect `/v1/system/dlq` metadata.
@@ -71,6 +88,15 @@ commissions them.
 ### AWS worker
 
 Use `.github/workflows/rollback.yml` with a previously approved ECR URI by digest. Wait for the Lambda update, then run an authenticated smoke test.
+
+This workflow restores only the recognition worker. It does not roll back the
+control API or event consumers.
+
+### Control API and event consumers
+
+Redeploy the ZIP Lambdas from an approved prior commit through a reviewed
+change. Confirm the control API version, then repeat the authenticated smoke
+test and recognition canary.
 
 ### Web application
 

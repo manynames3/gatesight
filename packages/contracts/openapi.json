@@ -710,6 +710,16 @@
           },
           {
             "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9._:-]{16,128}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
             "name": "x-gatesight-dev-claims",
             "required": false,
             "schema": {
@@ -762,6 +772,16 @@
             "required": true,
             "schema": {
               "title": "Alert Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9._:-]{16,128}$",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           },
@@ -1569,6 +1589,16 @@
           },
           {
             "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9._:-]{16,128}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
             "name": "x-gatesight-dev-claims",
             "required": false,
             "schema": {
@@ -1776,6 +1806,16 @@
       "post": {
         "operationId": "create_registration_v1_registrations_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9._:-]{16,128}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
           {
             "in": "header",
             "name": "x-gatesight-dev-claims",

@@ -93,3 +93,18 @@ def test_frame_verification_distinguishes_missing_from_aws_failure() -> None:
         pass
     else:
         raise AssertionError("AccessDenied must not be treated as a missing frame")
+
+
+def test_media_deletion_rejects_partial_s3_failure() -> None:
+    store = object.__new__(AwsStore)
+    store.s3 = Mock()
+    store.s3.delete_objects.return_value = {
+        "Errors": [{"Code": "AccessDenied", "Key": "private/frame.jpg"}]
+    }
+
+    try:
+        store.delete_media(["private/frame.jpg"])
+    except RuntimeError as error:
+        assert str(error) == "S3 failed to delete 1 media object(s)"
+    else:
+        raise AssertionError("partial S3 deletion must keep the observation retryable")

@@ -6,14 +6,17 @@ import base64
 import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.types import TypeSerializer
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from gatesight_control_api.settings import settings
+
+_serializer = TypeSerializer()
 
 
 def _json_default(value: Any) -> Any:
@@ -35,6 +38,14 @@ def _dynamodb_safe(value: Any) -> Any:
     if isinstance(value, tuple):
         return tuple(_dynamodb_safe(item) for item in value)
     return value
+
+
+def _serialize_item(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: _serializer.serialize(_dynamodb_safe(value))
+        for key, value in item.items()
+        if value is not None
+    }
 
 
 def encode_cursor(key: dict[str, Any] | None) -> str | None:
@@ -115,6 +126,84 @@ class AwsStore:
             arguments["ConditionExpression"] = condition
         attributes = self.table(table).update_item(**arguments).get("Attributes", {})
         return dict(attributes) if isinstance(attributes, dict) else {}
+
+    def save_observation_review(
+        self,
+        *,
+        tenant_id: str,
+        observation_id: str,
+        capture_id: str,
+        update_expression: str,
+        update_values: dict[str, Any],
+        update_names: dict[str, str],
+        update_condition: str,
+        audit: dict[str, Any],
+        idempotency: dict[str, Any],
+        outbox: dict[str, Any] | None,
+        client_request_token: str,
+    ) -> None:
+        transaction: list[dict[str, Any]] = [
+            {
+                "Update": {
+                    "TableName": f"{settings.table_prefix}-observations",
+                    "Key": _serialize_item({"tenantId": tenant_id, "recordId": observation_id}),
+                    "UpdateExpression": update_expression,
+                    "ConditionExpression": update_condition,
+                    "ExpressionAttributeNames": update_names,
+                    "ExpressionAttributeValues": _serialize_item(update_values),
+                }
+            },
+            {
+                "Put": {
+                    "TableName": f"{settings.table_prefix}-audit",
+                    "Item": _serialize_item(audit),
+                    "ConditionExpression": "attribute_not_exists(recordId)",
+                }
+            },
+            {
+                "Put": {
+                    "TableName": f"{settings.table_prefix}-idempotency",
+                    "Item": _serialize_item(idempotency),
+                    "ConditionExpression": "attribute_not_exists(recordId)",
+                }
+            },
+        ]
+        if outbox is not None:
+            transaction.extend(
+                [
+                    {
+                        "Update": {
+                            "TableName": f"{settings.table_prefix}-captures",
+                            "Key": _serialize_item({"tenantId": tenant_id, "recordId": capture_id}),
+                            "UpdateExpression": (
+                                "SET #status=:recognized, observationId=:observation, "
+                                "facilityStatus=:facility_status"
+                            ),
+                            "ConditionExpression": "#status<>:failed",
+                            "ExpressionAttributeNames": {"#status": "status"},
+                            "ExpressionAttributeValues": _serialize_item(
+                                {
+                                    ":recognized": "RECOGNIZED",
+                                    ":failed": "FAILED",
+                                    ":observation": observation_id,
+                                    ":facility_status": (f"{audit['facilityId']}#RECOGNIZED"),
+                                }
+                            ),
+                        }
+                    },
+                    {
+                        "Put": {
+                            "TableName": f"{settings.table_prefix}-outbox",
+                            "Item": _serialize_item(outbox),
+                            "ConditionExpression": "attribute_not_exists(recordId)",
+                        }
+                    },
+                ]
+            )
+        self.dynamodb_client.transact_write_items(
+            TransactItems=cast(Any, transaction),
+            ClientRequestToken=client_request_token,
+        )
 
     def delete(self, table: str, tenant_id: str, record_id: str) -> None:
         self.table(table).delete_item(
@@ -200,10 +289,13 @@ class AwsStore:
     def delete_media(self, keys: list[str]) -> None:
         if not keys:
             return
-        self.s3.delete_objects(
+        response = self.s3.delete_objects(
             Bucket=settings.capture_bucket,
             Delete={"Objects": [{"Key": key} for key in keys], "Quiet": True},
         )
+        errors = response.get("Errors", [])
+        if errors:
+            raise RuntimeError(f"S3 failed to delete {len(errors)} media object(s)")
 
     def presign_media(self, key: str) -> str:
         return str(

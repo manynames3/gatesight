@@ -31,7 +31,7 @@ The rule is simple: never trust a client-supplied identifier as authorization ev
 
 | Component | Responsibility | Scaling/failure boundary |
 | --- | --- | --- |
-| React station | Camera lifecycle, burst, memory-only queue, direct upload, polling | Browser/tab/device |
+| React station | Camera lifecycle, burst, one pending in-memory save, direct upload, polling | Browser/tab/device |
 | Control API | Sessions, presign, completion, status, domain/admin APIs | ZIP Lambda |
 | S3 | Encrypted capture and derived evidence retention | Regional service |
 | SQS Standard | Recognition buffer, retry, DLQ, backpressure | At-least-once |
@@ -62,6 +62,13 @@ strong four-frame OCR evidence can recover a plate when both detector passes
 miss.
 
 The worker uses a deterministic observation/outbox ID derived from the capture ID. A duplicate delivery either claims `QUEUED → PROCESSING`, sees the committed observation, or fails for retry; it cannot create another observation.
+
+When an `ADMIN` or `SECURITY` reviewer corrects an uncertain result, the
+control API atomically updates the observation and capture, writes the audit
+and idempotency records, and adds one new outbox event. Visits and security
+evaluation therefore receive the reviewed plate exactly once. A previously
+recognized result can only be confirmed; GateSight does not silently rewrite
+an already projected visit or alert.
 
 ## Availability and consistency
 

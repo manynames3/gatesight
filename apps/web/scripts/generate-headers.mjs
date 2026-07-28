@@ -28,7 +28,7 @@ const headers = `/*
   Referrer-Policy: no-referrer
   Permissions-Policy: camera=(self), microphone=(), geolocation=(), payment=(), usb=()
   Cross-Origin-Opener-Policy: same-origin
-  Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self' ${uploadSources}; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' ${api} ${uploadSources} ${cognitoAuthority} ${cognito}; font-src 'self'; upgrade-insecure-requests
+  Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self' ${uploadSources}; script-src 'self'; style-src 'self'; img-src 'self' blob: data: ${uploadSources}; media-src 'self' blob:; connect-src 'self' ${api} ${uploadSources} ${cognitoAuthority} ${cognito}; font-src 'self'; upgrade-insecure-requests
 
 /assets/*
   Cache-Control: public, max-age=31536000, immutable

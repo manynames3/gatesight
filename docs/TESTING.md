@@ -26,6 +26,8 @@ No single layer is allowed to claim coverage that belongs to another.
 | Scenario | Coverage |
 | --- | --- |
 | Permission denied / no camera / disconnect / low resolution | browser hook + Playwright/physical checklist |
+| Motion followed by a full stable interval | motion stability unit test + physical checklist |
+| Capture during API latency or temporary offline state | camera page behavior + physical checklist |
 | Partial upload / expired presign | upload component + real AWS E2E |
 | Invalid type / oversized / decompression bomb | `test_quality.py`, S3 POST policy |
 | Duplicate completion / SQS / outbox / EventBridge | idempotency/conditional component and AWS retry tests |
@@ -40,6 +42,11 @@ No single layer is allowed to claim coverage that belongs to another.
 | Guide detector miss / OCR fallback | recognition-engine and consensus tests + canary |
 | Fresh upload instructions | S3 verification and API/client tests |
 | Uncommissioned station | health-store and heartbeat-monitor tests |
+| Loading/error/empty operational pages and facility races | React operational-page tests |
+| Observation review, vehicle registration, and alert actions | API client + React operational-page tests, including stable retry keys |
+| Corrected review projection and rejected-review suppression | `test_control_api_review.py` |
+| Lower-role plate redaction on visit records | `test_control_api_privacy.py` |
+| Duplicate-free registration replay | `test_control_api_privacy.py` + API client tests |
 
 Some scenarios require deployed-service fault injection. Local mocks are useful, but they are never presented as production proof.
 

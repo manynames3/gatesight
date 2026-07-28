@@ -1,5 +1,40 @@
 import type { MotionSample } from "./types";
 
+export type AutomaticCaptureState = "watching" | "moving" | "stabilizing";
+
+export interface StabilityUpdate {
+  state: AutomaticCaptureState;
+  shouldCapture: boolean;
+}
+
+export class MotionStabilityTracker {
+  private motionActive = false;
+  private stableSince: number | null = null;
+
+  constructor(private readonly requiredStableMs = 650) {}
+
+  update(moving: boolean, nowMs: number): StabilityUpdate {
+    if (moving) {
+      this.motionActive = true;
+      this.stableSince = null;
+      return { state: "moving", shouldCapture: false };
+    }
+    if (!this.motionActive) {
+      return { state: "watching", shouldCapture: false };
+    }
+    this.stableSince ??= nowMs;
+    if (nowMs - this.stableSince < this.requiredStableMs) {
+      return { state: "stabilizing", shouldCapture: false };
+    }
+    return { state: "stabilizing", shouldCapture: true };
+  }
+
+  reset() {
+    this.motionActive = false;
+    this.stableSince = null;
+  }
+}
+
 export class MotionDetector {
   private previous: Uint8ClampedArray | null = null;
 

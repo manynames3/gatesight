@@ -139,6 +139,51 @@ describe("useCamera", () => {
     });
     expect(firstTrack.stopCount()).toBe(1);
     expect(result.current.selectedDeviceId).toBe("camera-b");
+    act(() => firstTrack.end());
+    expect(result.current.permission).toBe("granted");
+  });
+
+  it("ignores a superseded camera request that resolves late", async () => {
+    const firstTrack = track({ deviceId: "camera-a", width: 1920, height: 1080 });
+    const secondTrack = track({ deviceId: "camera-b", width: 1920, height: 1080 });
+    let resolveFirst: ((value: MediaStream) => void) | undefined;
+    let resolveSecond: ((value: MediaStream) => void) | undefined;
+    const getUserMedia = vi
+      .fn<(constraints: MediaStreamConstraints) => Promise<MediaStream>>()
+      .mockImplementationOnce(
+        () => new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+      )
+      .mockImplementationOnce(
+        () => new Promise((resolve) => {
+          resolveSecond = resolve;
+        }),
+      );
+    installMediaDevices(getUserMedia, [device("camera-a"), device("camera-b")]);
+    const { result } = renderHook(() => useCamera());
+    let firstRequest: Promise<void> | undefined;
+    let secondRequest: Promise<void> | undefined;
+
+    act(() => {
+      firstRequest = result.current.start("camera-a");
+    });
+    act(() => {
+      secondRequest = result.current.select("camera-b");
+    });
+    await act(async () => {
+      resolveSecond?.(stream(secondTrack));
+      await secondRequest;
+    });
+    await act(async () => {
+      resolveFirst?.(stream(firstTrack));
+      await firstRequest;
+    });
+
+    expect(result.current.selectedDeviceId).toBe("camera-b");
+    expect(result.current.permission).toBe("granted");
+    expect(firstTrack.stopCount()).toBe(1);
+    expect(secondTrack.stopCount()).toBe(0);
   });
 
   it("warns on low resolution and surfaces disconnection", async () => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { ApiClient } from "../api/client";
 import type {
@@ -8,7 +9,11 @@ import type {
 } from "../api/generated";
 import { pollCapture } from "../api/poll";
 import { captureBurst } from "../camera/capture";
-import { MotionDetector } from "../camera/motion";
+import {
+  MotionDetector,
+  MotionStabilityTracker,
+  type AutomaticCaptureState,
+} from "../camera/motion";
 import {
   assessCapturedPlate,
   burstResemblesPlate,
@@ -26,6 +31,22 @@ const terminalNeedsReview = new Set(["NEEDS_REVIEW", "NO_PLATE", "MULTIPLE_PLATE
 function captureStatusLabel(status: CaptureResult["status"]): string {
   if (status === "NO_PLATE") return "NOT DETECTED — REVIEW";
   return status.replaceAll("_", " ");
+}
+
+function captureStatusDescription(result: CaptureResult): string {
+  if (result.status === "UPLOADING") return "Saving the selected frames to AWS.";
+  if (result.status === "QUEUED") return "Saved in AWS and waiting for recognition.";
+  if (result.status === "PROCESSING") return "Recognition is running. The station remains ready.";
+  if (result.status === "RECOGNIZED") return "A plate was recognized and an observation was created.";
+  if (result.status === "NEEDS_REVIEW" || result.status === "NO_PLATE") {
+    return "The image is saved, but the reading needs a person to review it.";
+  }
+  if (result.status === "MULTIPLE_PLATES") {
+    return "More than one possible plate was found. Review is required.";
+  }
+  return result.failureCode
+    ? `Recognition could not finish (${result.failureCode}). The saved capture can be retried by an administrator.`
+    : "Recognition could not finish. The saved capture can be retried by an administrator.";
 }
 
 function captureKey(prefix: string, burstId: string) {
@@ -51,8 +72,11 @@ export function CameraStationPage() {
   const pollAbortRef = useRef<AbortController | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const detectorRef = useRef(new MotionDetector());
-  const motionSeenAtRef = useRef<number | null>(null);
+  const stabilityTrackerRef = useRef(new MotionStabilityTracker());
   const lastCaptureAtRef = useRef(0);
+  const facilityRequestRef = useRef(0);
+  const stationRequestRef = useRef(0);
+  const wasOnlineRef = useRef(navigator.onLine);
   const {
     videoRef,
     streamRef,
@@ -70,19 +94,22 @@ export function CameraStationPage() {
   const [stations, setStations] = useState<Station[]>([]);
   const [facilityId, setFacilityId] = useState("");
   const [stationId, setStationId] = useState("");
+  const [facilitiesLoading, setFacilitiesLoading] = useState(true);
+  const [stationsLoading, setStationsLoading] = useState(false);
+  const [assignmentError, setAssignmentError] = useState<string | null>(null);
   const [online, setOnline] = useState(navigator.onLine);
   const [heartbeat, setHeartbeat] = useState<"idle" | "sending" | "healthy" | "stale">("idle");
   const [clockOffsetMs, setClockOffsetMs] = useState(0);
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
-  const [motionState, setMotionState] = useState<"idle" | "watching" | "moving" | "stabilizing">(
-    "watching",
-  );
+  const [motionState, setMotionState] = useState<AutomaticCaptureState>("watching");
   const [pending, setPending] = useState<PendingBurst | null>(null);
   const [progress, setProgress] = useState<number[]>([]);
   const [captureResult, setCaptureResult] = useState<CaptureResult | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [captureStatusUnavailable, setCaptureStatusUnavailable] = useState(false);
+  const [resultRefreshBusy, setResultRefreshBusy] = useState(false);
 
   const station = stations.find((item) => item.recordId === stationId);
   const facility = facilities.find((item) => item.recordId === facilityId);
@@ -94,32 +121,88 @@ export function CameraStationPage() {
     return guideRegion(videoRef.current, plateGuideRef.current);
   }, [videoRef]);
 
-  useEffect(() => {
-    let active = true;
-    api
-      .getFacilities()
-      .then((page) => {
-        if (active) {
-          setFacilities(page.items);
-          if (page.items[0]) setFacilityId(page.items[0].recordId);
-        }
-      })
-      .catch((error: unknown) => setMessage(error instanceof Error ? error.message : String(error)));
-    return () => {
-      active = false;
-    };
+  const loadFacilities = useCallback(async () => {
+    const request = facilityRequestRef.current + 1;
+    facilityRequestRef.current = request;
+    setFacilitiesLoading(true);
+    setAssignmentError(null);
+    try {
+      const page = await api.getFacilities();
+      if (request !== facilityRequestRef.current) return;
+      setFacilities(page.items);
+      setFacilityId((current) =>
+        page.items.some((item) => item.recordId === current)
+          ? current
+          : page.items[0]?.recordId ?? "",
+      );
+      if (page.items.length === 0) {
+        stationRequestRef.current += 1;
+        setStations([]);
+        setStationId("");
+        setStationsLoading(false);
+        setAssignmentError(
+          "No facilities are assigned to this identity. Ask an administrator to grant facility access.",
+        );
+      }
+    } catch (error) {
+      if (request !== facilityRequestRef.current) return;
+      setAssignmentError(
+        error instanceof Error ? error.message : "Facilities could not be loaded.",
+      );
+    } finally {
+      if (request === facilityRequestRef.current) setFacilitiesLoading(false);
+    }
   }, [api]);
 
-  useEffect(() => {
-    if (!facilityId) return;
-    api
-      .getStations(facilityId)
-      .then((page) => {
+  const loadStations = useCallback(
+    async (nextFacilityId: string) => {
+      const request = stationRequestRef.current + 1;
+      stationRequestRef.current = request;
+      setStationsLoading(true);
+      setAssignmentError(null);
+      setStations([]);
+      setStationId("");
+      try {
+        const page = await api.getStations(nextFacilityId);
+        if (request !== stationRequestRef.current) return;
         setStations(page.items);
         setStationId(page.items[0]?.recordId ?? "");
-      })
-      .catch((error: unknown) => setMessage(error instanceof Error ? error.message : String(error)));
-  }, [api, facilityId]);
+        if (page.items.length === 0) {
+          setAssignmentError(
+            "This facility has no logical gates. Configure an entry or exit station before capturing.",
+          );
+        }
+      } catch (error) {
+        if (request !== stationRequestRef.current) return;
+        setAssignmentError(
+          error instanceof Error ? error.message : "Logical gates could not be loaded.",
+        );
+      } finally {
+        if (request === stationRequestRef.current) setStationsLoading(false);
+      }
+    },
+    [api],
+  );
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadFacilities(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      facilityRequestRef.current += 1;
+    };
+  }, [loadFacilities]);
+
+  useEffect(() => {
+    if (!facilityId) {
+      stationRequestRef.current += 1;
+      return;
+    }
+    const timer = window.setTimeout(() => void loadStations(facilityId), 0);
+    return () => {
+      window.clearTimeout(timer);
+      stationRequestRef.current += 1;
+    };
+  }, [facilityId, loadStations]);
 
   useEffect(() => {
     const onlineHandler = () => setOnline(true);
@@ -181,8 +264,9 @@ export function CameraStationPage() {
 
   useEffect(() => {
     const detector = detectorRef.current;
+    const stabilityTracker = stabilityTrackerRef.current;
     detector.reset();
-    motionSeenAtRef.current = null;
+    stabilityTracker.reset();
     if (!armed) {
       void wakeLockRef.current?.release();
       wakeLockRef.current = null;
@@ -201,7 +285,7 @@ export function CameraStationPage() {
     return () => {
       window.clearTimeout(clockTimer);
       detector.reset();
-      motionSeenAtRef.current = null;
+      stabilityTracker.reset();
       void wakeLockRef.current?.release();
       wakeLockRef.current = null;
     };
@@ -295,6 +379,7 @@ export function CameraStationPage() {
       setPending(null);
       setProgress([]);
       setCaptureResult({ recordId: session.captureId, status: "QUEUED" });
+      setCaptureStatusUnavailable(false);
       setSaveNotice(`Capture ${session.captureId} is verified in AWS.`);
       pollAbortRef.current?.abort();
       const pollAbort = new AbortController();
@@ -302,6 +387,7 @@ export function CameraStationPage() {
       void pollCapture(api, session.captureId, pollAbort.signal, setCaptureResult)
         .catch((error: unknown) => {
           if (!(error instanceof DOMException && error.name === "AbortError")) {
+            setCaptureStatusUnavailable(true);
             setSaveNotice(
               `Capture ${session.captureId} is saved in AWS; recognition status is temporarily unavailable.`,
             );
@@ -317,14 +403,11 @@ export function CameraStationPage() {
   const captureNow = useCallback(async () => {
     if (
       busy ||
+      pending ||
       !streamRef.current ||
       !videoRef.current ||
       !captureCanvasRef.current
     ) {
-      return;
-    }
-    if (!online) {
-      setMessage("Capture paused while offline. No image was taken.");
       return;
     }
     if (!facility || !station) {
@@ -342,7 +425,6 @@ export function CameraStationPage() {
         setMessage("The camera is still preparing the plate guide. Try again in a moment.");
         return;
       }
-      await api.getServerTime();
       const capturedAt = new Date();
       let frames = await captureBurst(
         streamRef.current,
@@ -369,6 +451,12 @@ export function CameraStationPage() {
       burst = { id: crypto.randomUUID(), capturedAt, frames, guideRegion: region };
       setPending(burst);
       lastCaptureAtRef.current = Date.now();
+      if (!online) {
+        setMessage(
+          "The plate was captured and is retained in this tab. Keep this page open; GateSight will save it to AWS when the connection returns.",
+        );
+        return;
+      }
       await processBurst(burst);
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -384,11 +472,11 @@ export function CameraStationPage() {
       setBusy(false);
     }
   }, [
-    api,
     busy,
     currentPlateRegion,
     facility,
     online,
+    pending,
     processBurst,
     station,
     streamRef,
@@ -401,7 +489,6 @@ export function CameraStationPage() {
     setMessage(null);
     setSaveNotice(null);
     try {
-      await api.getServerTime();
       await processBurst(pending);
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -414,7 +501,33 @@ export function CameraStationPage() {
       uploadAbortRef.current = null;
       setBusy(false);
     }
-  }, [api, busy, online, pending, processBurst]);
+  }, [busy, online, pending, processBurst]);
+
+  useEffect(() => {
+    const reconnected = !wasOnlineRef.current && online;
+    wasOnlineRef.current = online;
+    if (!reconnected || !pending || busy) return;
+    const retry = window.setTimeout(() => void retryPending(), 0);
+    return () => window.clearTimeout(retry);
+  }, [busy, online, pending, retryPending]);
+
+  const refreshLatestCapture = useCallback(async () => {
+    if (!captureResult || resultRefreshBusy) return;
+    setResultRefreshBusy(true);
+    setMessage(null);
+    try {
+      setCaptureResult(await api.getCapture(captureResult.recordId));
+      setCaptureStatusUnavailable(false);
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "The latest recognition status could not be refreshed.",
+      );
+    } finally {
+      setResultRefreshBusy(false);
+    }
+  }, [api, captureResult, resultRefreshBusy]);
 
   useEffect(() => {
     if (!armed) return;
@@ -425,7 +538,8 @@ export function CameraStationPage() {
         timestamp - lastSample >= 120 &&
         videoRef.current &&
         motionCanvasRef.current &&
-        !busy
+        !busy &&
+        !pending
       ) {
         lastSample = timestamp;
         const region = currentPlateRegion();
@@ -438,26 +552,22 @@ export function CameraStationPage() {
           motionCanvasRef.current,
           region,
         );
-        if (sample.moving) {
-          motionSeenAtRef.current ??= Date.now();
-          setMotionState("moving");
-        } else if (motionSeenAtRef.current) {
-          setMotionState("stabilizing");
-          const stableFor = Date.now() - motionSeenAtRef.current;
-          const cooldownElapsed = Date.now() - lastCaptureAtRef.current > 15_000;
-          if (stableFor >= 650 && cooldownElapsed) {
-            motionSeenAtRef.current = null;
-            void captureNow();
-          }
-        } else {
-          setMotionState("watching");
+        const stability = stabilityTrackerRef.current.update(
+          sample.moving,
+          Date.now(),
+        );
+        setMotionState(stability.state);
+        const cooldownElapsed = Date.now() - lastCaptureAtRef.current > 15_000;
+        if (stability.shouldCapture && cooldownElapsed) {
+          stabilityTrackerRef.current.reset();
+          void captureNow();
         }
       }
       frame = requestAnimationFrame(loop);
     };
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
-  }, [armed, busy, captureNow, currentPlateRegion, videoRef]);
+  }, [armed, busy, captureNow, currentPlateRegion, pending, videoRef]);
 
   const discard = () => {
     uploadAbortRef.current?.abort();
@@ -493,13 +603,17 @@ export function CameraStationPage() {
           <StatusChip tone={heartbeat === "healthy" ? "good" : heartbeat === "stale" ? "danger" : "neutral"}>
             Heartbeat {heartbeat}
           </StatusChip>
-          <StatusChip tone={armed ? "good" : "neutral"}>
-            {armed ? "Automatic" : "Waiting"}
+          <StatusChip tone={pending ? "warn" : armed ? "good" : "neutral"}>
+            {pending ? "Pending save" : armed ? "Automatic" : "Waiting"}
           </StatusChip>
         </div>
       </header>
 
-      {message && <div className="error-panel" role="alert">{message}</div>}
+      {message && (
+        <div className={pending ? "review-warning" : "error-panel"} role="alert">
+          {message}
+        </div>
+      )}
       {saveNotice && <div className="success-panel" role="status">{saveNotice}</div>}
       {captureResult && terminalNeedsReview.has(captureResult.status) && (
         <div className="review-warning" role="status">
@@ -510,13 +624,23 @@ export function CameraStationPage() {
       <section className="station-grid">
         <div className="camera-panel">
           <div className="camera-viewport">
-            <video ref={videoRef} muted playsInline aria-label="Live gate camera" />
+            <video
+              ref={videoRef}
+              muted
+              playsInline
+              aria-label="Live gate camera"
+              aria-describedby="plate-alignment-instructions"
+            />
+            <p id="plate-alignment-instructions" className="sr-only">
+              Position one vehicle plate inside the centered two-to-one guide. Keep the
+              characters level, evenly lit, and large enough to read.
+            </p>
             <div ref={plateGuideRef} className="plate-region" aria-hidden="true">
               <span>ALIGN PLATE</span>
             </div>
-            <div className="camera-overlay">
+            <div className="camera-overlay" aria-live="polite">
               <span>{station?.direction ?? "SELECT DIRECTION"}</span>
-              <span>{armed ? motionState.toUpperCase() : "IDLE"}</span>
+              <span>{pending ? "SAVE PENDING" : armed ? motionState.toUpperCase() : "IDLE"}</span>
             </div>
           </div>
           <canvas ref={captureCanvasRef} hidden />
@@ -569,16 +693,20 @@ export function CameraStationPage() {
                 <button
                   type="button"
                   className="capture-button"
-                  disabled={busy || !online || !facility || !station}
+                  disabled={busy || pending !== null || !facility || !station}
                   onClick={() => void captureNow()}
                 >
                   {busy
                     ? "Capturing / uploading…"
-                    : !online
-                      ? "Waiting for network"
+                    : pending
+                      ? online
+                        ? "Save the pending capture first"
+                        : "Pending capture waits for network"
                       : !facility || !station
                         ? "Select a station to capture"
-                        : "Capture now"}
+                        : online
+                          ? "Capture now"
+                          : "Capture now — save when online"}
                 </button>
               )}
             </div>
@@ -593,9 +721,11 @@ export function CameraStationPage() {
               <select
                 value={facilityId}
                 onChange={(event) => selectFacility(event.target.value)}
-                disabled={busy || pending !== null}
+                disabled={busy || pending !== null || facilitiesLoading}
               >
-                <option value="">Select facility</option>
+                <option value="">
+                  {facilitiesLoading ? "Loading facilities…" : "Select facility"}
+                </option>
                 {facilities.map((item) => <option key={item.recordId} value={item.recordId}>{item.name}</option>)}
               </select>
             </label>
@@ -604,12 +734,29 @@ export function CameraStationPage() {
               <select
                 value={stationId}
                 onChange={(event) => setStationId(event.target.value)}
-                disabled={busy || pending !== null}
+                disabled={busy || pending !== null || stationsLoading || !facilityId}
               >
-                <option value="">Select station</option>
+                <option value="">
+                  {stationsLoading ? "Loading logical gates…" : "Select station"}
+                </option>
                 {stations.map((item) => <option key={item.recordId} value={item.recordId}>{item.name} · {item.direction}</option>)}
               </select>
             </label>
+            {assignmentError && (
+              <div className="inline-error" role="alert">
+                <p>{assignmentError}</p>
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() =>
+                    facilityId ? void loadStations(facilityId) : void loadFacilities()
+                  }
+                  disabled={facilitiesLoading || stationsLoading}
+                >
+                  Retry station setup
+                </button>
+              </div>
+            )}
             <dl className="detail-list">
               <div><dt>Permission</dt><dd>{cameraPermission}</dd></div>
               <div>
@@ -669,7 +816,32 @@ export function CameraStationPage() {
               <StatusChip tone={captureResult.status === "RECOGNIZED" ? "good" : captureResult.status === "FAILED" ? "danger" : "warn"}>
                 {captureStatusLabel(captureResult.status)}
               </StatusChip>
+              <p className="result-summary">{captureStatusDescription(captureResult)}</p>
               <p>Capture {captureResult.recordId}</p>
+              <div className="result-actions">
+                {captureResult.observationId && (
+                  <Link
+                    className="secondary-button button-link"
+                    to={`/observations?facility=${encodeURIComponent(
+                      facilityId,
+                    )}&record=${encodeURIComponent(captureResult.observationId)}`}
+                  >
+                    View observation
+                  </Link>
+                )}
+                {(captureStatusUnavailable ||
+                  captureResult.status === "QUEUED" ||
+                  captureResult.status === "PROCESSING") && (
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => void refreshLatestCapture()}
+                    disabled={resultRefreshBusy}
+                  >
+                    {resultRefreshBusy ? "Checking…" : "Check status again"}
+                  </button>
+                )}
+              </div>
             </section>
           )}
         </aside>
