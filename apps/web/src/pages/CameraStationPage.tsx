@@ -19,6 +19,8 @@ import {
   burstResemblesPlate,
   captureGuidance,
   selectBestFrameIndices,
+  shouldStartAutomaticCapture,
+  tryAssessLivePlate,
 } from "../camera/plateGate";
 import { guideRegion } from "../camera/region";
 import type { PendingBurst } from "../camera/types";
@@ -442,7 +444,7 @@ export function CameraStationPage() {
         frames.length = 0;
         lastCaptureAtRef.current = Date.now();
         setMessage(
-          `The five-frame check found no reliable plate-like character structure. Nothing was uploaded. ${captureGuidance(assessments)}`,
+          `The five-frame check found no complete plate-shaped object with reliable character structure. Nothing was uploaded. ${captureGuidance(assessments)}`,
         );
         return;
       }
@@ -537,6 +539,7 @@ export function CameraStationPage() {
       if (
         timestamp - lastSample >= 120 &&
         videoRef.current &&
+        captureCanvasRef.current &&
         motionCanvasRef.current &&
         !busy &&
         !pending
@@ -559,8 +562,18 @@ export function CameraStationPage() {
         setMotionState(stability.state);
         const cooldownElapsed = Date.now() - lastCaptureAtRef.current > 15_000;
         if (stability.shouldCapture && cooldownElapsed) {
+          const check = tryAssessLivePlate(
+            videoRef.current,
+            captureCanvasRef.current,
+            region,
+          );
           stabilityTrackerRef.current.reset();
-          void captureNow();
+          setMotionState("watching");
+          if (check.assessment === null) {
+            setMessage(`Automatic plate check could not inspect the guide: ${check.error}`);
+          } else if (shouldStartAutomaticCapture(check.assessment)) {
+            void captureNow();
+          }
         }
       }
       frame = requestAnimationFrame(loop);
@@ -596,7 +609,10 @@ export function CameraStationPage() {
         <div>
           <p className="eyebrow">LIVE GATE</p>
           <h1>Camera station</h1>
-          <p>Plate-like text is checked locally before anything is retained or uploaded.</p>
+          <p>
+            Plate shape and character structure are checked locally before anything is
+            retained or uploaded.
+          </p>
         </div>
         <div className="header-status">
           <StatusChip tone={online ? "good" : "danger"}>{online ? "Online" : "Offline"}</StatusChip>
