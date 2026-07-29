@@ -1,12 +1,39 @@
 # GateSight
 
-GateSight turns a camera at a vehicle gate into a capture, recognition, visit, and alert workflow.
+GateSight is a live, serverless vehicle-gate ALPR portfolio MVP. It turns a
+browser-connected camera into a capture, recognition, visit, review, and alert
+workflow.
 
-The browser takes the pictures first. AWS processes them asynchronously. A slow model or temporary queue backlog can delay the answer, but it cannot stop the operator from capturing the vehicle.
+The browser checks for a plate-shaped object and character structure before
+anything is sent to AWS. AWS then performs recognition asynchronously, so a slow
+model or temporary queue backlog can delay the answer without blocking the
+operator.
 
-[Open GateSight](https://gatesight.pages.dev) · [Browse the documentation](docs/README.md)
+[Open the live app](https://gatesight.pages.dev) · [Browse the documentation](docs/README.md)
 
 > GateSight is an independent portfolio project. It is not affiliated with, sponsored by, or endorsed by Cox Automotive, Manheim, or any other vehicle marketplace or automotive company.
+
+## Live MVP
+
+| Surface | Current status |
+| --- | --- |
+| Web application | Publicly deployed on Cloudflare Pages; sign-in and camera permission are required |
+| Recognition pipeline | Live AWS serverless development environment |
+| Capture protection | Scenes rejected by the local multi-frame plate gate are not uploaded |
+| Intended use | Portfolio evaluation only |
+| Commercial release | Not cleared; model-weight and training-data rights require separate approval |
+
+## Try the live MVP
+
+1. [Open GateSight](https://gatesight.pages.dev) and sign in with an authorized account.
+2. Open **Camera station**, then choose Atlanta, Dallas, or San Diego, a logical
+   gate, and a connected camera.
+3. Align an authorized test plate inside the guide and use **Capture now**, or
+   wait for automatic capture after the plate becomes stable.
+4. Follow **Latest capture** from upload through recognition.
+5. Open **Observations** to inspect the decision and evidence. Recognized
+   `ENTRY` and `EXIT` events continue into the visit workflow; **System health**
+   shows the supporting AWS pipeline.
 
 ## Start here
 
@@ -29,12 +56,12 @@ An authorized operator:
 1. Signs in.
 2. Chooses a facility and an `ENTRY` or `EXIT` gate.
 3. Selects a connected camera.
-4. Captures manually or lets automatic capture trigger.
+4. Captures manually or lets automatic capture trigger when plate evidence is stable.
 5. Watches the result move from upload to recognition.
 
 GateSight then:
 
-- saves the approved image burst to private, encrypted S3;
+- saves the locally approved image burst to private, encrypted S3;
 - detects and reads the plate with a pretrained ALPR pipeline;
 - stores the evidence and decision in DynamoDB;
 - opens or closes a vehicle visit;
@@ -44,16 +71,18 @@ GateSight then:
 
 The goal is not “OCR at any cost.” The goal is a trustworthy gate record that keeps the lane moving.
 
-## The 60-second workflow
+## How a capture moves through GateSight
 
 ```text
 Camera
   ↓
+Manual trigger, or motion settles + strong live plate check
+  ↓
 5 in-memory candidate frames
   ↓
-Recall-first plate-likeness check
+At least 3 frames show a coherent plate boundary + character structure
   ↓
-Best 4 frames selected
+Best 3–4 passing frames selected
   ↓
 Private S3 upload
   ↓
@@ -71,14 +100,18 @@ Observation saved
 
 - The app requests video only—never microphone access.
 - The operator can choose any camera exposed by the browser.
-- Manual and automatic capture use the same best-four-of-five path.
-- A brief API slowdown cannot delay the exposure: frames are taken first, then saved.
+- Automatic capture checks the current guide after motion settles and does not
+  start a burst unless that live frame has strong plate evidence.
+- Manual and automatic capture both require at least three strong frames from
+  the five-frame burst before upload.
+- Only passing frames are selected; up to four are sent to AWS.
+- A brief API slowdown cannot delay an approved burst: frames are taken first,
+  then saved.
 - Frames stay in memory until upload or discard.
 - If the connection drops, one pending burst remains in the open tab and automatically
   retries when the browser comes back online.
-- One strong frame or two possible frames must show plate-like character structure before upload.
 - The app favors sharp, evenly lit frames and gives distance, glare, lighting, or alignment guidance when it rejects a burst.
-- Blank scenes and simple non-character patterns are discarded without upload.
+- A rejected burst is cleared in memory without an API request, S3 upload, or observation.
 - Closing, reloading, or leaving the camera page before upload loses the frames because GateSight intentionally creates no offline copy.
 
 ### What ADMIN and SECURITY reviewers can do
@@ -108,16 +141,16 @@ These screenshots use authorized portfolio test data.
 ![GateSight camera station with a plate aligned inside the capture guide](docs/images/camera-station.webp)
 
 The station keeps facility, gate, camera, and connection status in one view. The
-green confirmation means AWS verified the selected four-frame burst; recognition
-continues asynchronously while the station remains ready.
+green confirmation means AWS verified the accepted burst; recognition continues
+asynchronously while the station remains ready.
 
 ### Review every recognition outcome
 
 ![GateSight observations list showing recognized and review outcomes](docs/images/observations.webp)
 
 Observations are filterable by facility and retain capture time, direction,
-state, and a protected record ID. A weak result becomes `NOT DETECTED — REVIEW`
-instead of a false claim that no plate was present.
+state, and a protected record ID. Uncertain evidence becomes `NEEDS_REVIEW`;
+GateSight does not infer that no plate was present.
 
 ### See operational health at a glance
 
@@ -146,7 +179,8 @@ That separation gives the system three useful properties:
 
 ```mermaid
 flowchart LR
-    Browser["Authorized browser station"] --> Cognito["Cognito Hosted UI"]
+    Pages["Cloudflare Pages"] --> Browser["Authorized browser station"]
+    Browser --> Cognito["Cognito Hosted UI"]
     Browser --> API["API Gateway + FastAPI Lambda"]
     API --> Browser
     Browser --> S3["Private KMS-encrypted S3"]
@@ -167,7 +201,7 @@ For trust boundaries, consistency rules, state transitions, and topology, read [
 
 ## Recognition without overclaiming
 
-The production profile uses:
+The deployed recognition profile uses:
 
 - `fast-alpr==0.4.0`
 - `fast-plate-ocr==1.1.0`
@@ -347,7 +381,10 @@ For the current portfolio deployment:
 - the repository does not redistribute them; and
 - the deployment is non-commercial.
 
-Commercial use or redistribution remains blocked until the exact artifacts receive written rights and provenance approval. See the [Model card](docs/MODEL_CARD.md) and `ml/model-manifest.json`.
+Commercial use or redistribution remains blocked until either the exact
+artifacts receive written rights and provenance approval or the deployed models
+are replaced with rights-cleared alternatives. See the
+[Model card](docs/MODEL_CARD.md) and `ml/model-manifest.json`.
 
 ## Known limitations
 
@@ -355,6 +392,9 @@ Commercial use or redistribution remains blocked until the exact artifacts recei
 - Wake Lock is best effort.
 - Internet loss before upload can lose an in-memory capture.
 - Browser memory may be paged to disk by the operating system; GateSight makes no forensic zero-disk claim.
+- The local pre-upload check is a conservative browser heuristic, not a
+  production-grade object-detector guarantee; it still needs representative
+  physical-camera and negative-scene evaluation.
 - Accuracy is not yet measured on a rights-cleared, facility-representative dataset.
 - Confidence values are not automatically calibrated probabilities.
 - A permanently unattended facility may need a managed kiosk or signed edge agent.
