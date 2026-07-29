@@ -19,12 +19,97 @@ export interface PlateAssessment {
   horizontalEdgeDensity: number;
   strokeGroups: number;
   occupiedSectors: number;
+  rectangleScore: number;
 }
 
 const SAMPLE_WIDTH = 192;
 const SAMPLE_HEIGHT = 80;
 const EDGE_THRESHOLD = 80;
 const SECTOR_COUNT = 6;
+const RECTANGLE_THRESHOLD = 0.45;
+const SIDE_TOLERANCE = 2;
+const SIDE_GAP_TOLERANCE = 2;
+
+function coherentLineSupport(samples: boolean[]): number {
+  if (samples.length === 0) return 0;
+  const coverage = samples.filter(Boolean).length / samples.length;
+  let longestRun = 0;
+  let run = 0;
+  let gap = 0;
+  for (const supported of samples) {
+    if (supported) {
+      run += gap + 1;
+      gap = 0;
+      longestRun = Math.max(longestRun, run);
+    } else if (run > 0 && gap < SIDE_GAP_TOLERANCE) {
+      gap += 1;
+    } else {
+      run = 0;
+      gap = 0;
+    }
+  }
+  return Math.min(coverage, longestRun / samples.length);
+}
+
+function horizontalSideSupport(
+  gradients: Float32Array,
+  width: number,
+  height: number,
+  startRow: number,
+  endRow: number,
+): number {
+  const startX = Math.max(1, Math.round(width * 0.04));
+  const endX = Math.min(width - 1, Math.round(width * 0.96));
+  let maximum = 0;
+  for (let row = Math.max(1, startRow); row < Math.min(height - 1, endRow); row += 1) {
+    const samples: boolean[] = [];
+    for (let x = startX; x < endX; x += 1) {
+      let found = false;
+      for (let offset = -SIDE_TOLERANCE; offset <= SIDE_TOLERANCE; offset += 1) {
+        const y = row + offset;
+        if (y > 0 && y < height - 1 && gradients[y * width + x]! >= EDGE_THRESHOLD) {
+          found = true;
+          break;
+        }
+      }
+      samples.push(found);
+    }
+    maximum = Math.max(maximum, coherentLineSupport(samples));
+  }
+  return maximum;
+}
+
+function verticalSideSupport(
+  gradients: Float32Array,
+  width: number,
+  height: number,
+  startColumn: number,
+  endColumn: number,
+): number {
+  const startY = Math.max(1, Math.round(height * 0.075));
+  const endY = Math.min(height - 1, Math.round(height * 0.925));
+  let maximum = 0;
+  for (
+    let column = Math.max(1, startColumn);
+    column < Math.min(width - 1, endColumn);
+    column += 1
+  ) {
+    const samples: boolean[] = [];
+    for (let y = startY; y < endY; y += 1) {
+      let found = false;
+      for (let offset = -SIDE_TOLERANCE; offset <= SIDE_TOLERANCE; offset += 1) {
+        const x = column + offset;
+        if (x > 0 && x < width - 1 && gradients[y * width + x]! >= EDGE_THRESHOLD) {
+          found = true;
+          break;
+        }
+      }
+      samples.push(found);
+    }
+    maximum = Math.max(maximum, coherentLineSupport(samples));
+  }
+  return maximum;
+}
 
 export function analyzePlatePixels(
   pixels: Uint8ClampedArray,
@@ -46,6 +131,7 @@ export function analyzePlatePixels(
       horizontalEdgeDensity: 0,
       strokeGroups: 0,
       occupiedSectors: 0,
+      rectangleScore: 0,
     };
   }
 
@@ -70,6 +156,8 @@ export function analyzePlatePixels(
   const columnVerticalEdges = new Uint16Array(width);
   const sectorVerticalEdges = new Uint32Array(SECTOR_COUNT);
   const rowEdges = new Uint16Array(height);
+  const absoluteGradientX = new Float32Array(width * height);
+  const absoluteGradientY = new Float32Array(width * height);
   let edges = 0;
   let verticalEdges = 0;
   let horizontalEdges = 0;
@@ -98,6 +186,8 @@ export function analyzePlatePixels(
         luminance[bottom + x + 1]!;
       const absoluteX = Math.abs(gradientX);
       const absoluteY = Math.abs(gradientY);
+      absoluteGradientX[middle + x] = absoluteX;
+      absoluteGradientY[middle + x] = absoluteY;
 
       if (Math.hypot(absoluteX, absoluteY) >= EDGE_THRESHOLD) {
         edges += 1;
@@ -142,6 +232,37 @@ export function analyzePlatePixels(
   const verticalEdgeDensity = verticalEdges / interiorPixels;
   const horizontalEdgeDensity =
     horizontalEdges / Math.max(1, (width - 2) * textBandHeight);
+  const sideSupports = [
+    horizontalSideSupport(
+      absoluteGradientY,
+      width,
+      height,
+      2,
+      Math.round(height * 0.31),
+    ),
+    horizontalSideSupport(
+      absoluteGradientY,
+      width,
+      height,
+      Math.round(height * 0.69),
+      height - 2,
+    ),
+    verticalSideSupport(
+      absoluteGradientX,
+      width,
+      height,
+      2,
+      Math.round(width * 0.25),
+    ),
+    verticalSideSupport(
+      absoluteGradientX,
+      width,
+      height,
+      Math.round(width * 0.75),
+      width - 2,
+    ),
+  ].sort((left, right) => right - left);
+  const rectangleScore = sideSupports[2] ?? 0;
 
   const strongPlate =
     contrast >= 18 &&
@@ -151,7 +272,8 @@ export function analyzePlatePixels(
     strokeGroups >= 4 &&
     strokeGroups <= 48 &&
     occupiedSectors >= 3 &&
-    peakRowEdgeRatio >= 0.08;
+    peakRowEdgeRatio >= 0.08 &&
+    rectangleScore >= RECTANGLE_THRESHOLD;
   const possiblePlate =
     contrast >= 10 &&
     edgeDensity >= 0.012 &&
@@ -170,6 +292,7 @@ export function analyzePlatePixels(
     strokeGroups >= 3 && strokeGroups <= 56,
     occupiedSectors >= 2,
     peakRowEdgeRatio >= 0.045,
+    rectangleScore >= RECTANGLE_THRESHOLD,
   ].filter(Boolean).length;
   const darkRatio = darkPixels / luminance.length;
   const glareRatio = glarePixels / luminance.length;
@@ -178,6 +301,7 @@ export function analyzePlatePixels(
     Math.min(20, contrast / 2) +
     Math.min(12, edgeDensity * 200) +
     Math.min(8, occupiedSectors) -
+    (1 - rectangleScore) * 12 -
     darkRatio * 20 -
     glareRatio * 25;
 
@@ -195,6 +319,7 @@ export function analyzePlatePixels(
     horizontalEdgeDensity,
     strokeGroups,
     occupiedSectors,
+    rectangleScore,
   };
 }
 
@@ -248,13 +373,41 @@ export async function assessCapturedPlate(
   }
 }
 
+export function assessLivePlate(
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+  region: NormalizedRegion,
+): PlateAssessment {
+  return assessSource(video, video.videoWidth, video.videoHeight, canvas, region);
+}
+
+export type LivePlateCheckResult =
+  | { assessment: PlateAssessment; error: null }
+  | { assessment: null; error: string };
+
+export function tryAssessLivePlate(
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+  region: NormalizedRegion,
+): LivePlateCheckResult {
+  try {
+    return { assessment: assessLivePlate(video, canvas, region), error: null };
+  } catch (error) {
+    return {
+      assessment: null,
+      error: error instanceof Error ? error.message : "Camera frame cannot be inspected locally",
+    };
+  }
+}
+
+export function shouldStartAutomaticCapture(assessment: PlateAssessment): boolean {
+  return assessment.evidence === "strong";
+}
+
 export function burstResemblesPlate(assessments: PlateAssessment[]): boolean {
   if (assessments.length === 0) return false;
   const strongFrames = assessments.filter((assessment) => assessment.evidence === "strong").length;
-  const possibleFrames = assessments.filter(
-    (assessment) => assessment.evidence !== "none",
-  ).length;
-  return strongFrames >= 1 || possibleFrames >= 2;
+  return strongFrames >= 3;
 }
 
 export function selectBestFrameIndices(
@@ -263,6 +416,7 @@ export function selectBestFrameIndices(
 ): number[] {
   return assessments
     .map((assessment, index) => ({ assessment, index }))
+    .filter(({ assessment }) => assessment.evidence === "strong")
     .sort((left, right) => {
       const evidenceOrder = { strong: 2, possible: 1, none: 0 } as const;
       return (
@@ -287,6 +441,9 @@ export function captureGuidance(assessments: PlateAssessment[]): string {
   }
   if (average("glareRatio") > 0.18) {
     return "Tilt the plate or light slightly to reduce glare.";
+  }
+  if (average("rectangleScore") < RECTANGLE_THRESHOLD) {
+    return "Center the full rectangular plate inside the guide.";
   }
   if (average("occupiedSectors") < 2.5 || average("strokeGroups") < 3) {
     return "Move the plate closer and keep its characters inside the guide.";
