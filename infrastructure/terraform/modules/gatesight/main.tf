@@ -457,7 +457,7 @@ resource "aws_cognito_user_pool" "main" {
   mfa_configuration        = local.is_production ? "ON" : "OPTIONAL"
   software_token_mfa_configuration { enabled = true }
   password_policy {
-    minimum_length                   = 14
+    minimum_length                   = 12
     require_lowercase                = true
     require_numbers                  = true
     require_symbols                  = true
