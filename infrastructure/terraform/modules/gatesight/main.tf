@@ -514,8 +514,24 @@ resource "aws_cognito_user_pool_client" "web" {
 }
 
 resource "aws_cognito_user_pool_domain" "main" {
-  domain       = var.cognito_domain_prefix
+  domain                = var.cognito_domain_prefix
+  user_pool_id          = aws_cognito_user_pool.main.id
+  managed_login_version = 2
+}
+
+resource "aws_cognito_managed_login_branding" "main" {
   user_pool_id = aws_cognito_user_pool.main.id
+  client_id    = aws_cognito_user_pool_client.web.id
+  settings     = file("${path.module}/managed-login-settings.json")
+
+  asset {
+    bytes      = filebase64("${path.module}/managed-login-logo.svg")
+    category   = "FORM_LOGO"
+    color_mode = "DARK"
+    extension  = "SVG"
+  }
+
+  depends_on = [aws_cognito_user_pool_domain.main]
 }
 
 resource "aws_cognito_user_group" "roles" {
