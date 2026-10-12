@@ -516,13 +516,19 @@ resource "aws_cognito_user_pool_client" "web" {
 resource "aws_cognito_user_pool_domain" "main" {
   domain                = var.cognito_domain_prefix
   user_pool_id          = aws_cognito_user_pool.main.id
-  managed_login_version = 2
+  managed_login_version = var.enable_managed_login_branding ? 2 : 1
+}
+
+moved {
+  from = aws_cognito_managed_login_branding.main
+  to   = aws_cognito_managed_login_branding.main[0]
 }
 
 resource "aws_cognito_managed_login_branding" "main" {
+  count        = var.enable_managed_login_branding ? 1 : 0
   user_pool_id = aws_cognito_user_pool.main.id
   client_id    = aws_cognito_user_pool_client.web.id
-  settings     = file("${path.module}/managed-login-settings.json")
+  settings     = jsonencode(jsondecode(file("${path.module}/managed-login-settings.json")))
 
   asset {
     bytes      = filebase64("${path.module}/managed-login-logo.svg")

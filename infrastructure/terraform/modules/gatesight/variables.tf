@@ -46,6 +46,12 @@ variable "cognito_domain_prefix" {
   description = "Globally unique Cognito Hosted UI domain prefix."
 }
 
+variable "enable_managed_login_branding" {
+  type        = bool
+  default     = false
+  description = "Enable Cognito managed login v2 and GateSight branding; keep disabled outside the validated dev environment."
+}
+
 variable "notification_email" {
   type        = string
   default     = ""

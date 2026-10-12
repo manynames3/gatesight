@@ -1,4 +1,4 @@
-FROM public.ecr.aws/lambda/python:3.12@sha256:0628ddc11919f85f4261517d356392dbbc6b3181568d87a376ae2e814464c230 AS build
+FROM public.ecr.aws/lambda/python:3.12@sha256:9de2c1283aafd0564a66cabe38135ffad6d364d22caa98a50a991f00ba8f5f28 AS build
 
 RUN pip install --no-cache-dir uv==0.8.13
 COPY pyproject.toml uv.lock /build/
@@ -23,10 +23,7 @@ RUN mkdir -p /opt/models \
       --verify \
       "${RELEASE_FLAG}"
 
-FROM public.ecr.aws/lambda/python:3.12@sha256:0628ddc11919f85f4261517d356392dbbc6b3181568d87a376ae2e814464c230
-RUN dnf upgrade -y --releasever=latest glib2 libacl \
-    && dnf clean all \
-    && rm -rf /var/cache/dnf
+FROM public.ecr.aws/lambda/python:3.12@sha256:9de2c1283aafd0564a66cabe38135ffad6d364d22caa98a50a991f00ba8f5f28
 COPY --from=build "${LAMBDA_TASK_ROOT}" "${LAMBDA_TASK_ROOT}"
 COPY --from=build /opt/models /opt/models
 ENV GATESIGHT_MODEL_DIRECTORY=/opt/models \
