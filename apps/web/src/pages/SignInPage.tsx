@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
+import { Brand } from "../components/Brand";
 
 export function SignInPage() {
   const { user, ready, configured, authError, signIn } = useAuth();
@@ -26,14 +27,8 @@ export function SignInPage() {
   return (
     <main className="signin-page">
       <section className="signin-panel">
-        <div className="brand signin-brand">
-          <span className="brand-mark" aria-hidden="true">
-            GS
-          </span>
-          <div>
-            <strong>GateSight</strong>
-            <small>Vehicle gate operations</small>
-          </div>
+        <div className="signin-brand">
+          <Brand />
         </div>
         <p className="eyebrow">AUTHORIZED FACILITY ACCESS</p>
         <h1>Keep vehicle flow moving without sacrificing review.</h1>

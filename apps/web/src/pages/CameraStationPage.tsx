@@ -29,6 +29,7 @@ import { StatusChip } from "../components/StatusChip";
 import { useCamera } from "../hooks/useCamera";
 
 const terminalNeedsReview = new Set(["NEEDS_REVIEW", "NO_PLATE", "MULTIPLE_PLATES"]);
+const terminalCaptureStatuses = new Set(["RECOGNIZED", "NEEDS_REVIEW", "NO_PLATE", "MULTIPLE_PLATES", "FAILED"]);
 
 function captureStatusLabel(status: CaptureResult["status"]): string {
   if (status === "NO_PLATE") return "NOT DETECTED — REVIEW";
@@ -49,6 +50,35 @@ function captureStatusDescription(result: CaptureResult): string {
   return result.failureCode
     ? `Recognition could not finish (${result.failureCode}). The saved capture can be retried by an administrator.`
     : "Recognition could not finish. The saved capture can be retried by an administrator.";
+}
+
+function CaptureTimeline({ status }: { status: CaptureResult["status"] }) {
+  const saved = status !== "UPLOADING";
+  const finished = terminalCaptureStatuses.has(status);
+  const resultLabel = status === "RECOGNIZED"
+    ? "Recognized"
+    : status === "FAILED"
+      ? "Needs attention"
+      : finished
+        ? "Human review"
+        : "Result";
+  const steps = [
+    { label: "Captured", state: "complete" },
+    { label: "Saved to AWS", state: saved ? "complete" : "active" },
+    { label: "Reading plate", state: finished ? "complete" : saved ? "active" : "waiting" },
+    { label: resultLabel, state: finished ? "complete" : "waiting" },
+  ];
+
+  return (
+    <ol className="capture-timeline" aria-label="Capture progress">
+      {steps.map((step) => (
+        <li key={step.label} className={`capture-step ${step.state}`}>
+          <span aria-hidden="true" />
+          {step.label}
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 function captureKey(prefix: string, burstId: string) {
@@ -658,10 +688,28 @@ export function CameraStationPage() {
               <span>{station?.direction ?? "SELECT DIRECTION"}</span>
               <span>{pending ? "SAVE PENDING" : armed ? motionState.toUpperCase() : "IDLE"}</span>
             </div>
+            {cameraPermission !== "granted" && (
+              <div className="camera-idle" aria-hidden="true">
+                <span className="camera-idle-mark" />
+                <strong>Camera ready when you are</strong>
+                <small>Choose a source below to begin the live gate view.</small>
+              </div>
+            )}
           </div>
           <canvas ref={captureCanvasRef} hidden />
           <canvas ref={motionCanvasRef} hidden />
           <div className="camera-actions">
+            <div className="automatic-capture-summary">
+              <span className={armed ? "mode-indicator active" : "mode-indicator"} aria-hidden="true" />
+              <div className="mode-copy">
+                <strong>Automatic capture</strong>
+                <small>
+                  {armed
+                    ? "On · captures only when a plate-like object is stable in the guide"
+                    : "Standby · select a station and enable the camera"}
+                </small>
+              </div>
+            </div>
             <div className="camera-source-picker">
               <label htmlFor="camera-source">Camera source</label>
               <div className="camera-source-row">
@@ -826,14 +874,22 @@ export function CameraStationPage() {
             </section>
           )}
 
-          {captureResult && (
-            <section className="control-card result-card" aria-live="polite">
-              <h2>Latest capture</h2>
+          <section className="control-card result-card" aria-live="polite">
+            <div className="card-title-row">
+              <div>
+                <p className="card-kicker">CAPTURE PIPELINE</p>
+                <h2>Latest capture</h2>
+              </div>
+              {captureResult && (
               <StatusChip tone={captureResult.status === "RECOGNIZED" ? "good" : captureResult.status === "FAILED" ? "danger" : "warn"}>
                 {captureStatusLabel(captureResult.status)}
               </StatusChip>
+              )}
+            </div>
+            {captureResult ? (
+              <>
+              <CaptureTimeline status={captureResult.status} />
               <p className="result-summary">{captureStatusDescription(captureResult)}</p>
-              <p>Capture {captureResult.recordId}</p>
               <div className="result-actions">
                 {captureResult.observationId && (
                   <Link
@@ -858,8 +914,20 @@ export function CameraStationPage() {
                   </button>
                 )}
               </div>
-            </section>
-          )}
+              <details className="technical-details">
+                <summary>Technical details</summary>
+                <p>Capture ID</p>
+                <code>{captureResult.recordId}</code>
+              </details>
+              </>
+            ) : (
+              <div className="result-empty">
+                <span aria-hidden="true">◎</span>
+                <p>No capture yet</p>
+                <small>The most recent plate result will appear here.</small>
+              </div>
+            )}
+          </section>
         </aside>
       </section>
     </div>
