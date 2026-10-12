@@ -24,6 +24,10 @@ RUN mkdir -p /opt/models \
       "${RELEASE_FLAG}"
 
 FROM public.ecr.aws/lambda/python:3.12@sha256:9de2c1283aafd0564a66cabe38135ffad6d364d22caa98a50a991f00ba8f5f28
+RUN dnf upgrade -y --releasever=latest glib2 libacl curl-minimal pcre2 rpm rpm-libs \
+    && rm /usr/local/bin/aws-lambda-rie \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
 COPY --from=build "${LAMBDA_TASK_ROOT}" "${LAMBDA_TASK_ROOT}"
 COPY --from=build /opt/models /opt/models
 ENV GATESIGHT_MODEL_DIRECTORY=/opt/models \
