@@ -44,7 +44,7 @@ dev = [
   "httpx==0.28.1",
   "hypothesis==6.138.15",
   "moto[dynamodb,s3,sqs]==5.1.11",
-  "mypy==1.17.1",
+  "mypy==2.3.0",
   "pip-audit==2.9.0",
   "pytest==9.1.1",
   "pytest-cov==6.2.1",
